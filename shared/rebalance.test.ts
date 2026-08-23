@@ -169,6 +169,73 @@ describe('invariants', () => {
 describe('actualBps', () => {
   it('reports the current share of the portfolio', () => {
     expect(actualBps(5_000, 10_000)).toBe(5_000);
+    expect(actualBps(4_500, 10_000)).toBe(4_500);
+  });
+
+  it('returns zero for an empty portfolio instead of dividing by zero', () => {
     expect(actualBps(0, 0)).toBe(0);
+    expect(actualBps(100, 0)).toBe(0);
+  });
+
+  it('truncates rather than rounding, so shares never overstate', () => {
+    // 1/3 is 3333.33 bps; reporting 3334 would sum the five sleeves past 100%.
+    expect(actualBps(1, 3)).toBe(3_333);
+    expect(actualBps(2, 3)).toBe(6_666);
+  });
+
+  it('can exceed 100% when one sleeve holds more than the total', () => {
+    expect(actualBps(150, 100)).toBe(15_000);
+  });
+});
+
+describe('sleeves excluded from the target', () => {
+  it('never funds a sleeve whose target is zero', () => {
+    const withZero: RebalanceSleeve[] = [
+      { id: 'zero', accountId: 'non_registered', targetBps: 0, holdingCents: 0 },
+      { id: 'all', accountId: 'non_registered', targetBps: 10_000, holdingCents: 0 },
+    ];
+    const plan = planDeposit(withZero, [{ id: 'non_registered', roomRemainingCents: null }], 500_000);
+    expect(plan.lines.find((l) => l.sleeveId === 'zero')!.amountCents).toBe(0);
+    expect(plan.lines.find((l) => l.sleeveId === 'all')!.amountCents).toBe(500_000);
+  });
+});
+
+describe('unlimited contribution room', () => {
+  it('never caps an account whose room is null, however large the deposit', () => {
+    const onlyNonRegistered: RebalanceSleeve[] = [
+      { id: 'em_equity', accountId: 'non_registered', targetBps: 10_000, holdingCents: 0 },
+    ];
+    const plan = planDeposit(
+      onlyNonRegistered,
+      [{ id: 'non_registered', roomRemainingCents: null }],
+      500_000_000_00,
+    );
+    expect(plan.allocatedCents).toBe(500_000_000_00);
+    expect(plan.unallocatedCents).toBe(0);
+    expect(plan.cappedAccountIds).toEqual([]);
+  });
+});
+
+describe('the on-target invariant', () => {
+  it('lands every sleeve exactly on target when none is overweight', () => {
+    // The engine's contract: with no overweight sleeve the shortfalls sum to the
+    // deposit exactly, so each sleeve receives precisely what it needs.
+    const holdings = {
+      us_equity: 450_000,
+      cad_bonds: 100_000,
+      cad_equity: 200_000,
+      intl_equity: 150_000,
+      em_equity: 100_000,
+    };
+    const deposit = 1_000_000;
+    const plan = planDeposit(sleeves(holdings), roomy, deposit);
+    const total = Object.values(holdings).reduce((a, b) => a + b, 0) + deposit;
+
+    for (const line of plan.lines) {
+      const before = holdings[line.sleeveId as keyof typeof holdings];
+      const target = sleeves().find((s) => s.id === line.sleeveId)!.targetBps;
+      expect(before + line.amountCents).toBe((total * target) / 10_000);
+    }
+    expect(plan.unallocatedCents).toBe(0);
   });
 });

@@ -12,7 +12,8 @@
     "dev:web": "vite",
     "test": "vitest run",
     "typecheck": "tsc -b --noEmit && tsc -p tsconfig.server.json",
-    "db:reset": "psql -d invest_buddy -v ON_ERROR_STOP=1 -f server/db/schema.sql -f server/db/seed.sql"
+    "db:reset": "psql -d invest_buddy -v ON_ERROR_STOP=1 -f server/db/schema.sql -f server/db/seed.sql",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",
@@ -39,9 +40,11 @@
     "@types/pg": "^8.23.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "@types/supertest": "^7.2.1",
     "@vitejs/plugin-react": "^6.0.4",
     "concurrently": "^10.0.5",
     "oxlint": "^1.75.0",
+    "supertest": "^7.2.2",
     "tsx": "^4.23.12",
     "typescript": "~6.0.2",
     "vite": "^8.2.0",

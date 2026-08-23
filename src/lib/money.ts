@@ -46,7 +46,10 @@ export function parseAmountToCents(raw: string): ParsedAmount {
   const trimmed = raw.trim();
   if (trimmed === '') return { cents: null, error: null };
 
-  const cleaned = trimmed.replace(/[$\s,]/g, '');
+  // Strip currency decoration, then re-trim. Internal whitespace is deliberately
+  // NOT collapsed: "1 2" is ambiguous input, and reading it as $12 would be the
+  // same silent misreading this function rejects a third decimal place for.
+  const cleaned = trimmed.replace(/[$,]/g, '').trim();
   if (!/^\d*\.?\d*$/.test(cleaned) || cleaned === '' || cleaned === '.') {
     return { cents: null, error: 'Enter a dollar amount, for example 5,000' };
   }

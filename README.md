@@ -149,19 +149,43 @@ PATH fix above.
 | Script           | What it does                                     |
 | ---------------- | ------------------------------------------------ |
 | `pnpm dev`       | API and web dev server together                  |
-| `pnpm test`      | Rebalancing engine unit tests                    |
+| `pnpm test`      | Full unit test suite (needs local Postgres)      |
+| `pnpm test:watch`| Same suite in watch mode                         |
 | `pnpm typecheck` | Typecheck client and server                      |
 | `pnpm build`     | Production build                                 |
 | `pnpm db:reset`  | Drop, recreate and reseed all tables             |
+
+## Tests
+
+```bash
+pnpm test
+```
+
+Around 77 tests covering the rebalancing engine, money parsing and formatting,
+diagram geometry, the portfolio reader and every API endpoint. No React rendering
+tests — the logic those components rely on is covered directly.
+
+**The server tests need a running local PostgreSQL.** They do not touch your
+`invest_buddy` database: `server/test/db.ts` creates a throwaway database per test
+file, seeded from the same `schema.sql` and `seed.sql` the app ships, and drops it
+afterwards. It connects through `pg` rather than shelling out to `createdb`, so it
+does not need `psql` on your PATH. Set `DATABASE_URL` to point the tests at a
+different server.
+
+The API tests run against `createApp(pool)` via supertest without binding a port,
+which is why `server/index.ts` is only an entrypoint and all the routes live in
+`server/app.ts`.
 
 ## Layout
 
 ```
 shared/         rebalance.ts — the engine, plus its tests. Pure, no I/O.
                 types.ts     — contracts shared by API and client.
-server/         index.ts     — Express API.
+server/         app.ts       — createApp(pool): every route, pool injected.
+                index.ts     — entrypoint: builds a pool and listens.
                 portfolio.ts — reads portfolio state out of Postgres.
                 db/          — schema.sql, seed.sql, connection pool.
+                test/db.ts   — throwaway seeded database for tests.
 src/            App.tsx      — page shell, amount input, invest flow.
                 components/diagram/ — the SVG allocation diagram.
                 lib/         — API client and money formatting.
