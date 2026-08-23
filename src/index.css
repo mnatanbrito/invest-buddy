@@ -1,0 +1,301 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+    --font-heading: var(--font-sans);
+    --font-sans: 'Geist Variable', sans-serif;
+    --color-sidebar-ring: var(--sidebar-ring);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar: var(--sidebar);
+    --color-chart-5: var(--chart-5);
+    --color-chart-4: var(--chart-4);
+    --color-chart-3: var(--chart-3);
+    --color-chart-2: var(--chart-2);
+    --color-chart-1: var(--chart-1);
+    --color-ring: var(--ring);
+    --color-input: var(--input);
+    --color-border: var(--border);
+    --color-destructive: var(--destructive);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-accent: var(--accent);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-muted: var(--muted);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-secondary: var(--secondary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-primary: var(--primary);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-popover: var(--popover);
+    --color-card-foreground: var(--card-foreground);
+    --color-card: var(--card);
+    --color-foreground: var(--foreground);
+    --color-background: var(--background);
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) * 1.4);
+    --radius-2xl: calc(var(--radius) * 1.8);
+    --radius-3xl: calc(var(--radius) * 2.2);
+    --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.145 0 0);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.145 0 0);
+    --primary: oklch(0.205 0 0);
+    --primary-foreground: oklch(0.985 0 0);
+    --secondary: oklch(0.97 0 0);
+    --secondary-foreground: oklch(0.205 0 0);
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.556 0 0);
+    --accent: oklch(0.97 0 0);
+    --accent-foreground: oklch(0.205 0 0);
+    --destructive: oklch(0.577 0.245 27.325);
+    --border: oklch(0.922 0 0);
+    --input: oklch(0.922 0 0);
+    --ring: oklch(0.708 0 0);
+    --chart-1: oklch(0.87 0 0);
+    --chart-2: oklch(0.556 0 0);
+    --chart-3: oklch(0.439 0 0);
+    --chart-4: oklch(0.371 0 0);
+    --chart-5: oklch(0.269 0 0);
+    --radius: 0.625rem;
+    --sidebar: oklch(0.985 0 0);
+    --sidebar-foreground: oklch(0.145 0 0);
+    --sidebar-primary: oklch(0.205 0 0);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.97 0 0);
+    --sidebar-accent-foreground: oklch(0.205 0 0);
+    --sidebar-border: oklch(0.922 0 0);
+    --sidebar-ring: oklch(0.708 0 0);
+}
+
+.dark {
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.205 0 0);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.205 0 0);
+    --popover-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.922 0 0);
+    --primary-foreground: oklch(0.205 0 0);
+    --secondary: oklch(0.269 0 0);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.269 0 0);
+    --muted-foreground: oklch(0.708 0 0);
+    --accent: oklch(0.269 0 0);
+    --accent-foreground: oklch(0.985 0 0);
+    --destructive: oklch(0.704 0.191 22.216);
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.556 0 0);
+    --chart-1: oklch(0.87 0 0);
+    --chart-2: oklch(0.556 0 0);
+    --chart-3: oklch(0.439 0 0);
+    --chart-4: oklch(0.371 0 0);
+    --chart-5: oklch(0.269 0 0);
+    --sidebar: oklch(0.205 0 0);
+    --sidebar-foreground: oklch(0.985 0 0);
+    --sidebar-primary: oklch(0.488 0.243 264.376);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.269 0 0);
+    --sidebar-accent-foreground: oklch(0.985 0 0);
+    --sidebar-border: oklch(1 0 0 / 10%);
+    --sidebar-ring: oklch(0.556 0 0);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    }
+  body {
+    @apply bg-background text-foreground;
+    }
+  html {
+    @apply font-sans;
+    }
+}
+/* ---------------------------------------------------------------------------
+   Allocation diagram palette
+
+   One hue per account, echoing the source diagram: RRSP blue, TFSA green,
+   non-registered a warm terracotta. Each account's <g> carries a class that
+   binds these to the generic --panel-* / --box-* names the SVG actually draws
+   with, so the shapes stay hue-agnostic.
+   --------------------------------------------------------------------------- */
+:root {
+    --rrsp-panel: #eff5ff;
+    --rrsp-edge: #b8d3f8;
+    --rrsp-box-edge: #4a8ee0;
+    --rrsp-ink: #1a5fb4;
+    --rrsp-ink-strong: #10457f;
+
+    --tfsa-panel: #ecfaf1;
+    --tfsa-edge: #b3e2c6;
+    --tfsa-box-edge: #3d9e6a;
+    --tfsa-ink: #1c7d4d;
+    --tfsa-ink-strong: #145c38;
+
+    --nonreg-panel: #fdf1ed;
+    --nonreg-edge: #f3cbbb;
+    --nonreg-box-edge: #cf6b45;
+    --nonreg-ink: #a8482a;
+    --nonreg-ink-strong: #83341c;
+
+    --diagram-note: #5c6270;
+    --diagram-meta: #7b8290;
+    --diagram-track: #dfe3ea;
+}
+
+.dark {
+    --rrsp-panel: #101c2e;
+    --rrsp-edge: #29456b;
+    --rrsp-box-edge: #4a80c4;
+    --rrsp-ink: #8ab6ee;
+    --rrsp-ink-strong: #b6d3f7;
+
+    --tfsa-panel: #0e2019;
+    --tfsa-edge: #23503a;
+    --tfsa-box-edge: #3f9068;
+    --tfsa-ink: #74c79b;
+    --tfsa-ink-strong: #a6ddc0;
+
+    --nonreg-panel: #251510;
+    --nonreg-edge: #582f21;
+    --nonreg-box-edge: #c16644;
+    --nonreg-ink: #e09271;
+    --nonreg-ink-strong: #f0b79e;
+
+    --diagram-note: #9aa2b1;
+    --diagram-meta: #7d8593;
+    --diagram-track: #2b3140;
+}
+
+.acct-rrsp {
+    --panel-fill: var(--rrsp-panel);
+    --panel-stroke: var(--rrsp-edge);
+    --box-stroke: var(--rrsp-box-edge);
+    --ink: var(--rrsp-ink);
+    --ink-strong: var(--rrsp-ink-strong);
+}
+
+.acct-tfsa {
+    --panel-fill: var(--tfsa-panel);
+    --panel-stroke: var(--tfsa-edge);
+    --box-stroke: var(--tfsa-box-edge);
+    --ink: var(--tfsa-ink);
+    --ink-strong: var(--tfsa-ink-strong);
+}
+
+.acct-non_registered {
+    --panel-fill: var(--nonreg-panel);
+    --panel-stroke: var(--nonreg-edge);
+    --box-stroke: var(--nonreg-box-edge);
+    --ink: var(--nonreg-ink);
+    --ink-strong: var(--nonreg-ink-strong);
+}
+
+/* ---------------------------------------------------------------------------
+   Deposit flow animation
+
+   On invest, one token per funded sleeve flies from the amount input up into
+   its box, then the box pulses. Each token carries its own --dx/--dy offset and
+   --delay so the whole set staggers out of a single keyframe definition.
+   --------------------------------------------------------------------------- */
+@keyframes flow-token-travel {
+    0% {
+        transform: translate(0, 0) scale(0.4);
+        opacity: 0;
+    }
+    10% {
+        opacity: 1;
+    }
+    70% {
+        opacity: 1;
+    }
+    100% {
+        transform: translate(var(--dx), var(--dy)) scale(1);
+        opacity: 0;
+    }
+}
+
+@keyframes box-receive-pulse {
+    0% {
+        stroke-width: 1.5;
+        opacity: 1;
+    }
+    45% {
+        stroke-width: 5;
+        opacity: 1;
+    }
+    100% {
+        stroke-width: 1.5;
+        opacity: 1;
+    }
+}
+
+@keyframes box-receive-glow {
+    0% {
+        opacity: 0;
+        transform: scale(0.97);
+    }
+    40% {
+        opacity: 0.5;
+    }
+    100% {
+        opacity: 0;
+        transform: scale(1.03);
+    }
+}
+
+@keyframes amount-fade-in {
+    from {
+        opacity: 0;
+        transform: translateY(4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.flow-token {
+    animation: flow-token-travel 1s cubic-bezier(0.3, 0.7, 0.4, 1) var(--delay, 0s) both;
+}
+
+.box-receiving {
+    animation: box-receive-pulse 0.75s ease-out var(--delay, 0s) both;
+}
+
+.box-glow {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: box-receive-glow 0.9s ease-out var(--delay, 0s) both;
+}
+
+.preview-amount {
+    animation: amount-fade-in 0.18s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .flow-token,
+    .box-receiving,
+    .box-glow,
+    .preview-amount {
+        animation-duration: 0.01ms;
+        animation-iteration-count: 1;
+    }
+}
