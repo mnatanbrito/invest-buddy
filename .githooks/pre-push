@@ -1,0 +1,24 @@
+#!/bin/sh
+#
+# Refuses any push that targets main, so the mistake surfaces instantly instead of
+# after a round trip to GitHub. The repository ruleset is the real enforcement —
+# this hook only buys a faster, clearer error.
+#
+# Enable it in a fresh clone with:
+#   git config core.hooksPath .githooks
+#
+# There is deliberately no bypass flag: `git push --no-verify` already skips this,
+# and the server rejects the push anyway.
+
+protected_ref='refs/heads/main'
+
+# stdin gets one line per ref being pushed: <local ref> <local sha> <remote ref> <remote sha>
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+	if [ "$remote_ref" = "$protected_ref" ]; then
+		echo "pre-push: main is pull-request-only; refusing to push to it directly." >&2
+		echo "          git switch -c <branch> && git push -u origin HEAD" >&2
+		exit 1
+	fi
+done
+
+exit 0

@@ -176,6 +176,26 @@ The API tests run against `createApp(pool)` via supertest without binding a port
 which is why `server/index.ts` is only an entrypoint and all the routes live in
 `server/app.ts`.
 
+## Contributing
+
+`main` is pull-request-only: a repository ruleset blocks direct pushes, force-pushes
+and deletions, and holds the merge button until the `ci` workflow is green. That
+applies to everyone, including the repo owner — there is no bypass list.
+
+CI runs `pnpm lint`, `pnpm typecheck`, `pnpm test` and `pnpm build` on every PR,
+with PostgreSQL supplied as a service container so the database-backed tests run
+for real.
+
+One-time setup in a fresh clone, so a mistaken `git push origin main` is caught
+locally instead of by the server:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Git does not share hooks through a clone, and `core.hooksPath` is per-clone
+configuration, so this cannot be automated away without a dependency.
+
 ## Layout
 
 ```
