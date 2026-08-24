@@ -151,6 +151,7 @@ PATH fix above.
 | `pnpm dev`       | API and web dev server together                  |
 | `pnpm test`      | Full unit test suite (needs local Postgres)      |
 | `pnpm test:watch`| Same suite in watch mode                         |
+| `pnpm lint`      | oxlint; any warning fails the run                |
 | `pnpm typecheck` | Typecheck client and server                      |
 | `pnpm build`     | Production build                                 |
 | `pnpm db:reset`  | Drop, recreate and reseed all tables             |
