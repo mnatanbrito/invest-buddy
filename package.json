@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "concurrently -n api,web -c cyan,magenta \"pnpm dev:api\" \"pnpm dev:web\"",
     "build": "tsc -b && vite build",
-    "lint": "oxlint",
+    "lint": "oxlint --deny-warnings",
     "preview": "vite preview",
     "dev:api": "tsx watch server/index.ts",
     "dev:web": "vite",
