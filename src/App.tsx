@@ -138,8 +138,6 @@ export default function App() {
         </Alert>
       )}
 
-      <AllocationDiagram portfolio={portfolio} preview={preview} flight={flight} />
-
       <section className="rounded-xl border p-4 space-y-4">
         <form
           className="flex flex-wrap items-start gap-3"
@@ -207,6 +205,8 @@ export default function App() {
 
         {error && <p className="text-sm text-destructive">{error}</p>}
       </section>
+
+      <AllocationDiagram portfolio={portfolio} preview={preview} flight={flight} />
 
       <HistoryPanel
         history={history}
