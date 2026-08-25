@@ -65,8 +65,12 @@ function SettingsForm({
   const [rooms, setRooms] = useState<Record<string, string>>(() =>
     Object.fromEntries(registered.map((account) => [account.id, toField(account.roomLimitCents!)])),
   );
+  const assets = portfolio.sleeves.flatMap((sleeve) =>
+    sleeve.assets.map((asset) => ({ ...asset, sleeveLabel: sleeve.label })),
+  );
+
   const [holdings, setHoldings] = useState<Record<string, string>>(() =>
-    Object.fromEntries(portfolio.sleeves.map((sleeve) => [sleeve.id, toField(sleeve.holdingCents)])),
+    Object.fromEntries(assets.map((asset) => [asset.id, toField(asset.holdingCents)])),
   );
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -82,9 +86,9 @@ function SettingsForm({
         cents: parseFieldToCents(rooms[account.id] ?? '', `${account.label} contribution room`),
       }));
       const holdingCents = Object.fromEntries(
-        portfolio.sleeves.map((sleeve) => [
-          sleeve.id,
-          parseFieldToCents(holdings[sleeve.id] ?? '', `${sleeve.tickers} holding`),
+        assets.map((asset) => [
+          asset.id,
+          parseFieldToCents(holdings[asset.id] ?? '', `${asset.ticker} holding`),
         ]),
       );
 
@@ -143,19 +147,19 @@ function SettingsForm({
             Set these once if you already hold these ETFs. Rebalancing uses them to decide which
             sleeves are underweight.
           </p>
-          {portfolio.sleeves.map((sleeve) => (
-            <div key={sleeve.id} className="grid grid-cols-[1fr_auto] items-center gap-3">
-              <Label htmlFor={`holding-${sleeve.id}`} className="flex flex-col items-start gap-0.5">
-                <span>{sleeve.tickers}</span>
-                <span className="text-xs font-normal text-muted-foreground">{sleeve.label}</span>
+          {assets.map((asset) => (
+            <div key={asset.id} className="grid grid-cols-[1fr_auto] items-center gap-3">
+              <Label htmlFor={`holding-${asset.id}`} className="flex flex-col items-start gap-0.5">
+                <span>{asset.ticker}</span>
+                <span className="text-xs font-normal text-muted-foreground">{asset.sleeveLabel}</span>
               </Label>
               <Input
-                id={`holding-${sleeve.id}`}
+                id={`holding-${asset.id}`}
                 inputMode="decimal"
                 className="w-40 text-right tabular-nums"
-                value={holdings[sleeve.id] ?? ''}
+                value={holdings[asset.id] ?? ''}
                 onChange={(event) =>
-                  setHoldings((prev) => ({ ...prev, [sleeve.id]: event.target.value }))
+                  setHoldings((prev) => ({ ...prev, [asset.id]: event.target.value }))
                 }
               />
             </div>

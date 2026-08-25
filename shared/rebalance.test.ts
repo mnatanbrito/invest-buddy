@@ -1,14 +1,39 @@
 import { describe, expect, it } from 'vitest';
-import { actualBps, apportion, planDeposit, type RebalanceAccount, type RebalanceSleeve } from './rebalance';
+import {
+  actualBps,
+  apportion,
+  effectiveTargetBps,
+  effectiveWeight,
+  planDeposit,
+  type RebalanceAccount,
+  type RebalanceUnit,
+} from './rebalance';
 
-/** The five sleeves from the target allocation diagram. */
-const sleeves = (holdings: Partial<Record<string, number>> = {}): RebalanceSleeve[] => [
-  { id: 'us_equity', accountId: 'rrsp', targetBps: 4500, holdingCents: holdings.us_equity ?? 0 },
-  { id: 'cad_bonds', accountId: 'rrsp', targetBps: 1000, holdingCents: holdings.cad_bonds ?? 0 },
-  { id: 'cad_equity', accountId: 'tfsa', targetBps: 2000, holdingCents: holdings.cad_equity ?? 0 },
-  { id: 'intl_equity', accountId: 'tfsa', targetBps: 1500, holdingCents: holdings.intl_equity ?? 0 },
-  { id: 'em_equity', accountId: 'non_registered', targetBps: 1000, holdingCents: holdings.em_equity ?? 0 },
+/** The five sleeves from the target allocation diagram, one asset each (weightBps: 10000). */
+const units = (holdings: Partial<Record<string, number>> = {}): RebalanceUnit[] => [
+  unit('us_equity', 'rrsp', 'rrsp', 4500, 10_000, holdings.us_equity ?? 0),
+  unit('cad_bonds', 'rrsp', 'rrsp', 1000, 10_000, holdings.cad_bonds ?? 0),
+  unit('cad_equity', 'tfsa', 'tfsa', 2000, 10_000, holdings.cad_equity ?? 0),
+  unit('intl_equity', 'tfsa', 'tfsa', 1500, 10_000, holdings.intl_equity ?? 0),
+  unit('em_equity', 'non_registered', 'non_registered', 1000, 10_000, holdings.em_equity ?? 0),
 ];
+
+function unit(
+  id: string,
+  sleeveId: string,
+  accountId: string,
+  sleeveTargetBps: number,
+  assetWeightBps: number,
+  holdingCents: number,
+): RebalanceUnit {
+  return {
+    id,
+    sleeveId,
+    accountId,
+    targetWeight: effectiveWeight(sleeveTargetBps, assetWeightBps),
+    holdingCents,
+  };
+}
 
 const roomy: RebalanceAccount[] = [
   { id: 'rrsp', roomRemainingCents: 100_000_000 },
@@ -17,7 +42,7 @@ const roomy: RebalanceAccount[] = [
 ];
 
 const byId = (plan: ReturnType<typeof planDeposit>) =>
-  Object.fromEntries(plan.lines.map((l) => [l.sleeveId, l.amountCents]));
+  Object.fromEntries(plan.lines.map((l) => [l.assetId, l.amountCents]));
 
 describe('apportion', () => {
   it('splits exactly, losing no units to rounding', () => {
@@ -40,7 +65,7 @@ describe('apportion', () => {
 
 describe('planDeposit into an empty portfolio', () => {
   it('lands exactly on the target weights', () => {
-    const plan = planDeposit(sleeves(), roomy, 1_000_000); // $10,000
+    const plan = planDeposit(units(), roomy, 1_000_000); // $10,000
     expect(byId(plan)).toEqual({
       us_equity: 450_000,
       cad_bonds: 100_000,
@@ -50,13 +75,22 @@ describe('planDeposit into an empty portfolio', () => {
     });
     expect(plan.unallocatedCents).toBe(0);
   });
+
+  it('splits a deposit within a sleeve according to asset weights', () => {
+    const multiAsset: RebalanceUnit[] = [
+      unit('vti', 'us_equity', 'rrsp', 10_000, 7000, 0),
+      unit('itot', 'us_equity', 'rrsp', 10_000, 3000, 0),
+    ];
+    const plan = planDeposit(multiAsset, [{ id: 'rrsp', roomRemainingCents: null }], 1_000_000);
+    expect(byId(plan)).toEqual({ vti: 700_000, itot: 300_000 });
+  });
 });
 
 describe('planDeposit with drift', () => {
-  it('starves the overweight sleeve and feeds the underweight ones', () => {
+  it('starves the overweight asset and feeds the underweight ones', () => {
     // US equity is far over target; Canadian equity is far under.
     const plan = planDeposit(
-      sleeves({ us_equity: 4_680_000, cad_bonds: 900_000, cad_equity: 990_000, intl_equity: 1_350_000, em_equity: 900_000 }),
+      units({ us_equity: 4_680_000, cad_bonds: 900_000, cad_equity: 990_000, intl_equity: 1_350_000, em_equity: 900_000 }),
       roomy,
       1_000_000,
     );
@@ -68,13 +102,13 @@ describe('planDeposit with drift', () => {
 
   it('reaches the targets exactly when the deposit is large enough to cover every shortfall', () => {
     const holdings = { us_equity: 0, cad_bonds: 0, cad_equity: 500_000, intl_equity: 0, em_equity: 0 };
-    // No sleeve is overweight relative to the post-deposit total, so all needs are met.
-    const plan = planDeposit(sleeves(holdings), roomy, 100_000_000);
+    // No unit is overweight relative to the post-deposit total, so all needs are met.
+    const plan = planDeposit(units(holdings), roomy, 100_000_000);
     const total = 100_000_000 + 500_000;
     for (const line of plan.lines) {
-      const sleeve = sleeves(holdings).find((s) => s.id === line.sleeveId)!;
-      const finalValue = sleeve.holdingCents + line.amountCents;
-      expect(Math.abs(finalValue - (total * sleeve.targetBps) / 10_000)).toBeLessThanOrEqual(1);
+      const u = units(holdings).find((x) => x.id === line.assetId)!;
+      const finalValue = u.holdingCents + line.amountCents;
+      expect(Math.abs(finalValue - (total * u.targetWeight) / 100_000_000)).toBeLessThanOrEqual(1);
     }
   });
 });
@@ -86,7 +120,7 @@ describe('contribution room capping', () => {
       { id: 'tfsa', roomRemainingCents: 100_000_000 },
       { id: 'non_registered', roomRemainingCents: null },
     ];
-    const plan = planDeposit(sleeves(), accounts, 1_000_000);
+    const plan = planDeposit(units(), accounts, 1_000_000);
     const got = byId(plan);
 
     expect(got.us_equity + got.cad_bonds).toBe(100_000);
@@ -103,7 +137,7 @@ describe('contribution room capping', () => {
       { id: 'tfsa', roomRemainingCents: 0 },
       { id: 'non_registered', roomRemainingCents: null },
     ];
-    const plan = planDeposit(sleeves(), accounts, 1_000_000);
+    const plan = planDeposit(units(), accounts, 1_000_000);
     expect(plan.allocatedCents).toBe(100_000); // emerging markets only
     expect(plan.unallocatedCents).toBe(900_000);
     expect(plan.cappedAccountIds).toEqual(['rrsp', 'tfsa']);
@@ -115,7 +149,7 @@ describe('contribution room capping', () => {
       { id: 'tfsa', roomRemainingCents: 100_000_000 },
       { id: 'non_registered', roomRemainingCents: null },
     ];
-    const plan = planDeposit(sleeves(), accounts, 1_000_000);
+    const plan = planDeposit(units(), accounts, 1_000_000);
     expect(byId(plan).us_equity).toBe(0);
     expect(byId(plan).cad_bonds).toBe(0);
   });
@@ -143,7 +177,7 @@ describe('invariants', () => {
         { id: 'non_registered', roomRemainingCents: null },
       ];
       const deposit = 1 + rand(5_000_000);
-      const plan = planDeposit(sleeves(holdings), accounts, deposit);
+      const plan = planDeposit(units(holdings), accounts, deposit);
 
       expect(plan.allocatedCents + plan.unallocatedCents).toBe(deposit);
       expect(plan.lines.reduce((s, l) => s + l.amountCents, 0)).toBe(plan.allocatedCents);
@@ -160,9 +194,9 @@ describe('invariants', () => {
   });
 
   it('rejects deposits that are not a positive whole number of cents', () => {
-    expect(() => planDeposit(sleeves(), roomy, 0)).toThrow(RangeError);
-    expect(() => planDeposit(sleeves(), roomy, -100)).toThrow(RangeError);
-    expect(() => planDeposit(sleeves(), roomy, 10.5)).toThrow(RangeError);
+    expect(() => planDeposit(units(), roomy, 0)).toThrow(RangeError);
+    expect(() => planDeposit(units(), roomy, -100)).toThrow(RangeError);
+    expect(() => planDeposit(units(), roomy, 10.5)).toThrow(RangeError);
   });
 });
 
@@ -188,22 +222,37 @@ describe('actualBps', () => {
   });
 });
 
-describe('sleeves excluded from the target', () => {
-  it('never funds a sleeve whose target is zero', () => {
-    const withZero: RebalanceSleeve[] = [
-      { id: 'zero', accountId: 'non_registered', targetBps: 0, holdingCents: 0 },
-      { id: 'all', accountId: 'non_registered', targetBps: 10_000, holdingCents: 0 },
+describe('effectiveWeight and effectiveTargetBps', () => {
+  it('multiplies sleeve target by asset weight, exactly', () => {
+    expect(effectiveWeight(4500, 7000)).toBe(31_500_000);
+  });
+
+  it('floors the display bps rather than rounding it up', () => {
+    // 4500 * 3333 / 10000 = 1499.85 -> floors to 1499, never 1500.
+    expect(effectiveTargetBps(4500, 3333)).toBe(1499);
+  });
+
+  it('lands on the sleeve target when the asset holds the whole sleeve', () => {
+    expect(effectiveTargetBps(4500, 10_000)).toBe(4500);
+  });
+});
+
+describe('units excluded from the target', () => {
+  it('never funds an asset whose effective weight is zero', () => {
+    const withZero: RebalanceUnit[] = [
+      unit('zero', 'sleeve', 'non_registered', 0, 10_000, 0),
+      unit('all', 'sleeve2', 'non_registered', 10_000, 10_000, 0),
     ];
     const plan = planDeposit(withZero, [{ id: 'non_registered', roomRemainingCents: null }], 500_000);
-    expect(plan.lines.find((l) => l.sleeveId === 'zero')!.amountCents).toBe(0);
-    expect(plan.lines.find((l) => l.sleeveId === 'all')!.amountCents).toBe(500_000);
+    expect(plan.lines.find((l) => l.assetId === 'zero')!.amountCents).toBe(0);
+    expect(plan.lines.find((l) => l.assetId === 'all')!.amountCents).toBe(500_000);
   });
 });
 
 describe('unlimited contribution room', () => {
   it('never caps an account whose room is null, however large the deposit', () => {
-    const onlyNonRegistered: RebalanceSleeve[] = [
-      { id: 'em_equity', accountId: 'non_registered', targetBps: 10_000, holdingCents: 0 },
+    const onlyNonRegistered: RebalanceUnit[] = [
+      unit('em_equity', 'em_equity', 'non_registered', 10_000, 10_000, 0),
     ];
     const plan = planDeposit(
       onlyNonRegistered,
@@ -217,9 +266,9 @@ describe('unlimited contribution room', () => {
 });
 
 describe('the on-target invariant', () => {
-  it('lands every sleeve exactly on target when none is overweight', () => {
-    // The engine's contract: with no overweight sleeve the shortfalls sum to the
-    // deposit exactly, so each sleeve receives precisely what it needs.
+  it('lands every asset exactly on target when none is overweight', () => {
+    // The engine's contract: with no overweight unit the shortfalls sum to the
+    // deposit exactly, so each unit receives precisely what it needs.
     const holdings = {
       us_equity: 450_000,
       cad_bonds: 100_000,
@@ -228,13 +277,13 @@ describe('the on-target invariant', () => {
       em_equity: 100_000,
     };
     const deposit = 1_000_000;
-    const plan = planDeposit(sleeves(holdings), roomy, deposit);
+    const plan = planDeposit(units(holdings), roomy, deposit);
     const total = Object.values(holdings).reduce((a, b) => a + b, 0) + deposit;
 
     for (const line of plan.lines) {
-      const before = holdings[line.sleeveId as keyof typeof holdings];
-      const target = sleeves().find((s) => s.id === line.sleeveId)!.targetBps;
-      expect(before + line.amountCents).toBe((total * target) / 10_000);
+      const before = holdings[line.assetId as keyof typeof holdings];
+      const targetWeight = units().find((u) => u.id === line.assetId)!.targetWeight;
+      expect(before + line.amountCents).toBe((total * targetWeight) / 100_000_000);
     }
     expect(plan.unallocatedCents).toBe(0);
   });

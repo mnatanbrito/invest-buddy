@@ -3,21 +3,22 @@ import type { Account, Sleeve } from '@shared/types';
 import { CANVAS, FLOW_ORIGIN, layoutDiagram } from './layout';
 
 const accounts: Account[] = [
-  { id: 'rrsp', label: 'RRSP', note: 'US-listed direct, no withholding tax', roomLimitCents: 5_000_000, roomUsedCents: 0, roomRemainingCents: 5_000_000, sortOrder: 1 },
-  { id: 'tfsa', label: 'TFSA', note: 'Highest-growth assets, tax-free forever', roomLimitCents: 2_500_000, roomUsedCents: 0, roomRemainingCents: 2_500_000, sortOrder: 2 },
-  { id: 'non_registered', label: 'Non-registered', note: 'Overflow once RRSP and TFSA are maxed', roomLimitCents: null, roomUsedCents: 0, roomRemainingCents: null, sortOrder: 3 },
+  { id: 'rrsp', label: 'RRSP', note: 'US-listed direct, no withholding tax', roomLimitCents: 5_000_000, roomUsedCents: 0, roomRemainingCents: 5_000_000, holdingCents: 0, sortOrder: 1 },
+  { id: 'tfsa', label: 'TFSA', note: 'Highest-growth assets, tax-free forever', roomLimitCents: 2_500_000, roomUsedCents: 0, roomRemainingCents: 2_500_000, holdingCents: 0, sortOrder: 2 },
+  { id: 'non_registered', label: 'Non-registered', note: 'Overflow once RRSP and TFSA are maxed', roomLimitCents: null, roomUsedCents: 0, roomRemainingCents: null, holdingCents: 0, sortOrder: 3 },
 ];
 
 const sleeve = (id: string, accountId: string, targetBps: number, sortOrder: number): Sleeve => ({
   id,
   accountId,
-  tickers: id,
   label: id,
   targetBps,
+  sortOrder,
+  assets: [],
   holdingCents: 0,
   actualBps: 0,
   driftBps: 0,
-  sortOrder,
+  assetWeightTotalBps: 0,
 });
 
 const sleeves: Sleeve[] = [

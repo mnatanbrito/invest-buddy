@@ -311,7 +311,7 @@ function SleeveBox({
       )}
 
       <text x={box.centerX} y={y + 30} textAnchor="middle" fontSize={16.5} fontWeight={600} fill="var(--ink)">
-        {sleeve.tickers}
+        {sleeve.assets.map((asset) => asset.ticker).join(' / ') || 'No assets yet'}
       </text>
       <text x={box.centerX} y={y + 51} textAnchor="middle" fontSize={13.5} fill="var(--ink)">
         {sleeve.label}

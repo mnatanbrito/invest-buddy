@@ -11,7 +11,9 @@ interface HistoryPanelProps {
 }
 
 export function HistoryPanel({ history, portfolio, onUndo, undoing }: HistoryPanelProps) {
-  const sleeveNames = new Map(portfolio.sleeves.map((sleeve) => [sleeve.id, sleeve.tickers]));
+  const assetTickers = new Map(
+    portfolio.sleeves.flatMap((sleeve) => sleeve.assets.map((asset) => [asset.id, asset.ticker])),
+  );
 
   if (history.length === 0) {
     return (
@@ -47,8 +49,8 @@ export function HistoryPanel({ history, portfolio, onUndo, undoing }: HistoryPan
               {record.lines
                 .filter((line) => line.amountCents > 0)
                 .map((line) => (
-                  <Badge key={line.sleeveId} variant="secondary" className="font-normal tabular-nums">
-                    {sleeveNames.get(line.sleeveId) ?? line.sleeveId} {formatCents(line.amountCents)}
+                  <Badge key={line.assetId} variant="secondary" className="font-normal tabular-nums">
+                    {assetTickers.get(line.assetId) ?? line.assetId} {formatCents(line.amountCents)}
                   </Badge>
                 ))}
             </div>

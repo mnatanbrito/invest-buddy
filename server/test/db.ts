@@ -1,12 +1,12 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { Pool } from 'pg';
-import { DEFAULT_CONNECTION_STRING, createPool } from '../db/pool';
+import { DEFAULT_CONNECTION_STRING, createPool, withTransaction } from '../db/pool';
+import { EXAMPLE_PORTFOLIO, insertPortfolio } from '../presets/example';
 
 const SQL_DIR = path.resolve(import.meta.dirname, '../db');
 
 const schemaSql = readFileSync(path.join(SQL_DIR, 'schema.sql'), 'utf8');
-const seedSql = readFileSync(path.join(SQL_DIR, 'seed.sql'), 'utf8');
 
 const baseUrl = () => process.env.DATABASE_URL ?? DEFAULT_CONNECTION_STRING;
 
@@ -59,7 +59,6 @@ export async function createTestDatabase(label: string): Promise<TestDatabase> {
 
   const pool = createPool(urlForDatabase(name));
   await pool.query(schemaSql);
-  await pool.query(seedSql);
 
   return {
     pool,
@@ -67,11 +66,15 @@ export async function createTestDatabase(label: string): Promise<TestDatabase> {
     reset: async () => {
       // schema.sql drops and recreates every table, so this also clears the ledger.
       await pool.query(schemaSql);
-      await pool.query(seedSql);
     },
     drop: async () => {
       await pool.end();
       await withAdmin((admin) => admin.query(`DROP DATABASE IF EXISTS "${name}"`));
     },
   };
+}
+
+/** Loads the example account/sleeve/asset tree into an (assumed empty) test database. */
+export async function loadExample(pool: Pool): Promise<void> {
+  await withTransaction(pool, (client) => insertPortfolio(client, EXAMPLE_PORTFOLIO));
 }

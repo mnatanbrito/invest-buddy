@@ -12,7 +12,7 @@
     "dev:web": "vite",
     "test": "vitest run",
     "typecheck": "tsc -b --noEmit && tsc -p tsconfig.server.json",
-    "db:reset": "psql -d invest_buddy -v ON_ERROR_STOP=1 -f server/db/schema.sql -f server/db/seed.sql",
+    "db:reset": "psql -d invest_buddy -v ON_ERROR_STOP=1 -f server/db/schema.sql",
     "test:watch": "vitest"
   },
   "dependencies": {

@@ -2,7 +2,7 @@ import type { Express } from 'express';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from './app';
-import { createTestDatabase, type TestDatabase } from './test/db';
+import { createTestDatabase, loadExample, type TestDatabase } from './test/db';
 import type { AllocationPlan, InvestmentRecord, PortfolioState } from '../shared/types';
 
 let db: TestDatabase;
@@ -19,13 +19,14 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await db.reset();
+  await loadExample(db.pool);
 });
 
 const invest = (amountCents: unknown) =>
   request(app).post('/api/invest').send({ amountCents }).set('content-type', 'application/json');
 
-const sleeveAmounts = (plan: AllocationPlan) =>
-  Object.fromEntries(plan.lines.map((line) => [line.sleeveId, line.amountCents]));
+const assetAmounts = (plan: AllocationPlan) =>
+  Object.fromEntries(plan.lines.map((line) => [line.assetId, line.amountCents]));
 
 describe('POST /api/invest validation', () => {
   it('rejects zero and negative amounts', async () => {
@@ -59,12 +60,12 @@ describe('POST /api/invest', () => {
   it('splits an opening deposit onto the target weights and persists it', async () => {
     const { body } = await invest(1_000_000).expect(200);
 
-    expect(sleeveAmounts(body.plan)).toEqual({
-      us_equity: 450_000,
-      cad_bonds: 100_000,
-      cad_equity: 200_000,
-      intl_equity: 150_000,
-      em_equity: 100_000,
+    expect(assetAmounts(body.plan)).toEqual({
+      us_equity_vti: 450_000,
+      cad_bonds_vab: 100_000,
+      cad_equity_vcn: 200_000,
+      intl_equity_xef: 150_000,
+      em_equity_vee: 100_000,
     });
     expect(body.portfolio.totalCents).toBe(1_000_000);
 
@@ -72,30 +73,46 @@ describe('POST /api/invest', () => {
     expect(rows.rows[0].n).toBe(5);
   });
 
-  it('keeps sleeve holdings equal to what it reported allocating', async () => {
+  it('keeps asset holdings equal to what it reported allocating', async () => {
     await invest(1_000_000).expect(200);
     await invest(333_333).expect(200);
 
     const { body } = await request(app).get('/api/portfolio').expect(200);
     const portfolio = body as PortfolioState;
-    const summed = portfolio.sleeves.reduce((total, sleeve) => total + sleeve.holdingCents, 0);
+    const summed = portfolio.sleeves
+      .flatMap((sleeve) => sleeve.assets)
+      .reduce((total, asset) => total + asset.holdingCents, 0);
     expect(summed).toBe(portfolio.totalCents);
     expect(summed).toBe(1_000_000 + 333_333);
   });
 
-  it('routes a later deposit to the underweight sleeves', async () => {
+  it('routes a later deposit to the underweight assets', async () => {
     await request(app)
       .put('/api/holdings')
-      .send({ holdings: { us_equity: 900_000, cad_bonds: 0, cad_equity: 0, intl_equity: 0, em_equity: 0 } })
+      .send({
+        holdings: {
+          us_equity_vti: 900_000,
+          cad_bonds_vab: 0,
+          cad_equity_vcn: 0,
+          intl_equity_xef: 0,
+          em_equity_vee: 0,
+        },
+      })
       .expect(200);
 
     const { body } = await invest(1_000_000).expect(200);
-    const amounts = sleeveAmounts(body.plan);
+    const amounts = assetAmounts(body.plan);
 
     // US equity is far overweight, so it should be starved in favour of the rest.
-    expect(amounts.us_equity).toBe(0);
-    expect(amounts.cad_equity).toBeGreaterThan(0);
+    expect(amounts.us_equity_vti).toBe(0);
+    expect(amounts.cad_equity_vcn).toBeGreaterThan(0);
     expect(body.plan.allocatedCents).toBe(1_000_000);
+  });
+
+  it('refuses to invest when the allocation is incomplete', async () => {
+    await db.pool.query("UPDATE sleeves SET target_bps = 4000 WHERE id = 'us_equity'");
+    const { body } = await invest(1_000_000).expect(400);
+    expect(body.error).toMatch(/not 100%/);
   });
 });
 
@@ -129,12 +146,12 @@ describe('contribution room capping', () => {
   it('sends nothing to a registered account once its room is gone', async () => {
     await invest(10_000_000).expect(200);
     const { body } = await invest(500_000).expect(200);
-    const amounts = sleeveAmounts(body.plan as AllocationPlan);
+    const amounts = assetAmounts(body.plan as AllocationPlan);
 
-    expect(amounts.us_equity).toBe(0);
-    expect(amounts.cad_bonds).toBe(0);
-    expect(amounts.cad_equity).toBe(0);
-    expect(amounts.intl_equity).toBe(0);
+    expect(amounts.us_equity_vti).toBe(0);
+    expect(amounts.cad_bonds_vab).toBe(0);
+    expect(amounts.cad_equity_vcn).toBe(0);
+    expect(amounts.intl_equity_xef).toBe(0);
   });
 
   it('holds the whole deposit as cash when room is gone and non-registered is overweight', async () => {
@@ -154,18 +171,18 @@ describe('contribution room capping', () => {
     // Drop emerging markets below its target while the registered rooms stay full.
     await request(app)
       .put('/api/holdings')
-      .send({ holdings: { em_equity: 0 } })
+      .send({ holdings: { em_equity_vee: 0 } })
       .expect(200);
 
     const { body } = await invest(500_000).expect(200);
     const plan = body.plan as AllocationPlan;
-    const amounts = sleeveAmounts(plan);
+    const amounts = assetAmounts(plan);
 
-    // Emerging markets is the only sleeve that can actually be funded. The TFSA
+    // Emerging markets is the only asset that can actually be funded. The TFSA
     // sleeves are underweight too, so they still claim a share of the deposit and
     // then have it blocked, which is why the rest comes back as cash.
-    expect(amounts.em_equity).toBeGreaterThan(0);
-    expect(plan.allocatedCents).toBe(amounts.em_equity);
+    expect(amounts.em_equity_vee).toBeGreaterThan(0);
+    expect(plan.allocatedCents).toBe(amounts.em_equity_vee);
     for (const line of plan.lines) {
       if (line.accountId !== 'non_registered') expect(line.amountCents).toBe(0);
     }
@@ -241,29 +258,31 @@ describe('PUT /api/holdings', () => {
   it('sets opening balances', async () => {
     const { body } = await request(app)
       .put('/api/holdings')
-      .send({ holdings: { us_equity: 123_456, cad_bonds: 1_000 } })
+      .send({ holdings: { us_equity_vti: 123_456, cad_bonds_vab: 1_000 } })
       .expect(200);
 
-    const sleeves = (body as PortfolioState).sleeves;
-    expect(sleeves.find((s) => s.id === 'us_equity')!.holdingCents).toBe(123_456);
-    expect(sleeves.find((s) => s.id === 'cad_bonds')!.holdingCents).toBe(1_000);
+    const assets = (body as PortfolioState).sleeves.flatMap((s) => s.assets);
+    expect(assets.find((a) => a.id === 'us_equity_vti')!.holdingCents).toBe(123_456);
+    expect(assets.find((a) => a.id === 'cad_bonds_vab')!.holdingCents).toBe(1_000);
   });
 
-  it('rolls the whole request back when one sleeve id is unknown', async () => {
-    // us_equity is valid and comes first; it must not survive the failed request.
+  it('rolls the whole request back when one asset id is unknown', async () => {
+    // us_equity_vti is valid and comes first; it must not survive the failed request.
     await request(app)
       .put('/api/holdings')
-      .send({ holdings: { us_equity: 999_999, not_a_sleeve: 1_000 } })
+      .send({ holdings: { us_equity_vti: 999_999, not_an_asset: 1_000 } })
       .expect(500);
 
     const { body } = await request(app).get('/api/portfolio').expect(200);
-    const usEquity = (body as PortfolioState).sleeves.find((s) => s.id === 'us_equity')!;
+    const usEquity = (body as PortfolioState).sleeves
+      .flatMap((s) => s.assets)
+      .find((a) => a.id === 'us_equity_vti')!;
     expect(usEquity.holdingCents).toBe(0);
   });
 
   it('rejects negative and fractional holdings', async () => {
-    await request(app).put('/api/holdings').send({ holdings: { us_equity: -1 } }).expect(400);
-    await request(app).put('/api/holdings').send({ holdings: { us_equity: 1.5 } }).expect(400);
+    await request(app).put('/api/holdings').send({ holdings: { us_equity_vti: -1 } }).expect(400);
+    await request(app).put('/api/holdings').send({ holdings: { us_equity_vti: 1.5 } }).expect(400);
   });
 });
 
@@ -280,6 +299,7 @@ describe('GET /api/history', () => {
     expect(history[1].requestedCents).toBe(1_000_000);
     expect(history[0].lines).toHaveLength(5);
     expect(history[0].lines[0]).toMatchObject({
+      assetId: expect.any(String),
       sleeveId: expect.any(String),
       amountCents: expect.any(Number),
       intendedCents: expect.any(Number),
@@ -303,6 +323,12 @@ describe('POST /api/preview', () => {
     expect((after as PortfolioState).totalCents).toBe(0);
 
     const { body: executed } = await invest(1_000_000).expect(200);
-    expect(sleeveAmounts(preview as AllocationPlan)).toEqual(sleeveAmounts(executed.plan));
+    expect(assetAmounts(preview as AllocationPlan)).toEqual(assetAmounts(executed.plan));
+  });
+
+  it('refuses to preview when the allocation is incomplete', async () => {
+    await db.pool.query("UPDATE sleeves SET target_bps = 4000 WHERE id = 'us_equity'");
+    const { body } = await request(app).post('/api/preview').send({ amountCents: 1_000_000 }).expect(400);
+    expect(body.error).toMatch(/not 100%/);
   });
 });

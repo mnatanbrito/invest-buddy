@@ -3,8 +3,19 @@ import type { Pool } from 'pg';
 import { z } from 'zod';
 import { withTransaction } from './db/pool';
 import { readPortfolio } from './portfolio';
+import { allocationIssues, toRebalanceUnits } from '../shared/allocation';
 import { planDeposit } from '../shared/rebalance';
 import type { InvestmentRecord } from '../shared/types';
+
+/** Thrown by a handler to short-circuit with a specific status code and message. */
+export class HttpError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
 
 /** Cent amounts arrive as integers; anything else is a client bug, not a rounding hint. */
 const centsSchema = z
@@ -40,6 +51,10 @@ const route =
         res.status(400).json({ error: error.issues[0]?.message ?? 'invalid request' });
         return;
       }
+      if (error instanceof HttpError) {
+        res.status(error.status).json({ error: error.message });
+        return;
+      }
       console.error(error);
       res.status(500).json({ error: error instanceof Error ? error.message : 'unexpected error' });
     });
@@ -73,7 +88,9 @@ export function createApp(pool: Pool): Express {
       const client = await pool.connect();
       try {
         const portfolio = await readPortfolio(client);
-        res.json(planDeposit(portfolio.sleeves, portfolio.accounts, amountCents));
+        const issue = allocationIssues(portfolio)[0];
+        if (issue) throw new HttpError(400, issue.message);
+        res.json(planDeposit(toRebalanceUnits(portfolio), portfolio.accounts, amountCents));
       } finally {
         client.release();
       }
@@ -91,10 +108,12 @@ export function createApp(pool: Pool): Express {
       const { amountCents } = depositSchema.parse(req.body);
 
       const result = await withTransaction(pool, async (client) => {
-        await client.query('LOCK TABLE sleeves IN SHARE ROW EXCLUSIVE MODE');
+        await client.query('LOCK TABLE assets IN SHARE ROW EXCLUSIVE MODE');
 
         const portfolio = await readPortfolio(client);
-        const plan = planDeposit(portfolio.sleeves, portfolio.accounts, amountCents);
+        const issue = allocationIssues(portfolio)[0];
+        if (issue) throw new HttpError(400, issue.message);
+        const plan = planDeposit(toRebalanceUnits(portfolio), portfolio.accounts, amountCents);
 
         const { rows } = await client.query<{ id: number; created_at: Date }>(
           `INSERT INTO investments (requested_cents, allocated_cents, unallocated_cents)
@@ -105,14 +124,14 @@ export function createApp(pool: Pool): Express {
 
         for (const line of plan.lines) {
           await client.query(
-            `INSERT INTO investment_lines (investment_id, sleeve_id, intended_cents, amount_cents)
+            `INSERT INTO investment_lines (investment_id, asset_id, intended_cents, amount_cents)
              VALUES ($1, $2, $3, $4)`,
-            [investmentId, line.sleeveId, line.intendedCents, line.amountCents],
+            [investmentId, line.assetId, line.intendedCents, line.amountCents],
           );
           if (line.amountCents > 0) {
-            await client.query('UPDATE sleeves SET holding_cents = holding_cents + $1 WHERE id = $2', [
+            await client.query('UPDATE assets SET holding_cents = holding_cents + $1 WHERE id = $2', [
               line.amountCents,
-              line.sleeveId,
+              line.assetId,
             ]);
           }
         }
@@ -129,7 +148,7 @@ export function createApp(pool: Pool): Express {
     '/api/undo',
     route(async (_req, res) => {
       const result = await withTransaction(pool, async (client) => {
-        await client.query('LOCK TABLE sleeves IN SHARE ROW EXCLUSIVE MODE');
+        await client.query('LOCK TABLE assets IN SHARE ROW EXCLUSIVE MODE');
 
         const { rows } = await client.query<{ id: number }>(
           'SELECT id FROM investments ORDER BY id DESC LIMIT 1',
@@ -138,10 +157,10 @@ export function createApp(pool: Pool): Express {
 
         const investmentId = rows[0].id;
         await client.query(
-          `UPDATE sleeves s
-              SET holding_cents = GREATEST(0, s.holding_cents - l.amount_cents)
+          `UPDATE assets a
+              SET holding_cents = GREATEST(0, a.holding_cents - l.amount_cents)
              FROM investment_lines l
-            WHERE l.sleeve_id = s.id AND l.investment_id = $1`,
+            WHERE l.asset_id = a.id AND l.investment_id = $1`,
           [investmentId],
         );
         await client.query('DELETE FROM investments WHERE id = $1', [investmentId]);
@@ -184,12 +203,12 @@ export function createApp(pool: Pool): Express {
     route(async (req, res) => {
       const { holdings } = holdingsSchema.parse(req.body);
       const portfolio = await withTransaction(pool, async (client) => {
-        for (const [sleeveId, cents] of Object.entries(holdings)) {
-          const { rowCount } = await client.query(
-            'UPDATE sleeves SET holding_cents = $1 WHERE id = $2',
-            [cents, sleeveId],
-          );
-          if (rowCount === 0) throw new Error(`unknown sleeve: ${sleeveId}`);
+        for (const [assetId, cents] of Object.entries(holdings)) {
+          const { rowCount } = await client.query('UPDATE assets SET holding_cents = $1 WHERE id = $2', [
+            cents,
+            assetId,
+          ]);
+          if (rowCount === 0) throw new Error(`unknown asset: ${assetId}`);
         }
         return readPortfolio(client);
       });
@@ -209,7 +228,8 @@ export function createApp(pool: Pool): Express {
                 COALESCE(
                   json_agg(
                     json_build_object(
-                      'sleeveId', l.sleeve_id,
+                      'assetId', l.asset_id,
+                      'sleeveId', ast.sleeve_id,
                       'intendedCents', l.intended_cents,
                       'amountCents', l.amount_cents
                     ) ORDER BY l.id
@@ -218,6 +238,7 @@ export function createApp(pool: Pool): Express {
                 ) AS lines
            FROM investments i
            LEFT JOIN investment_lines l ON l.investment_id = i.id
+           LEFT JOIN assets ast ON ast.id = l.asset_id
           GROUP BY i.id
           ORDER BY i.id DESC
           LIMIT 50`,

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AllocationPlan, InvestmentRecord, PortfolioState } from '@shared/types';
+import { allocationIssues, toRebalanceUnits } from '@shared/allocation';
 import { planDeposit } from '@shared/rebalance';
 import { api } from '@/lib/api';
 import { formatCents, parseAmountToCents } from '@/lib/money';
@@ -45,10 +46,12 @@ export default function App() {
    * diagram shows and what gets written can't disagree. The server still re-plans
    * authoritatively against locked rows.
    */
+  const issues = useMemo(() => (portfolio ? allocationIssues(portfolio) : []), [portfolio]);
+
   const preview = useMemo(() => {
-    if (!portfolio || parsed.cents === null || flight) return null;
-    return planDeposit(portfolio.sleeves, portfolio.accounts, parsed.cents);
-  }, [portfolio, parsed.cents, flight]);
+    if (!portfolio || parsed.cents === null || flight || issues.length > 0) return null;
+    return planDeposit(toRebalanceUnits(portfolio), portfolio.accounts, parsed.cents);
+  }, [portfolio, parsed.cents, flight, issues]);
 
   const invest = async () => {
     if (parsed.cents === null || !portfolio) return;
@@ -105,7 +108,7 @@ export default function App() {
 
   const shown = preview ?? (flight ? flight.plan : null);
   const exhaustedAccounts = portfolio.accounts.filter((a) => a.roomRemainingCents === 0);
-  const canInvest = parsed.cents !== null && busy === null;
+  const canInvest = parsed.cents !== null && busy === null && issues.length === 0;
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-8 space-y-8">
@@ -177,6 +180,10 @@ export default function App() {
             {busy === 'investing' ? 'Investing…' : 'Invest'}
           </Button>
         </form>
+
+        {issues.length > 0 && (
+          <p className="text-sm text-destructive">{issues[0].message}</p>
+        )}
 
         {shown && shown.unallocatedCents > 0 && (
           <p className="text-sm text-destructive">
