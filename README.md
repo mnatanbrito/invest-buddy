@@ -7,6 +7,12 @@ You type in how much you want to invest. The app works out where the money shoul
 go, shows it landing on the allocation diagram, and records it so the next
 deposit accounts for what you already hold.
 
+<!-- Renders inline on GitHub once this file is pushed (relative path resolves against the repo). -->
+<video src="docs/media/demo.mp4" controls muted playsinline width="720">
+  Demo video: entering a deposit, previewing the split across sleeves, and
+  watching it land.
+</video>
+
 ## The allocation
 
 Weights are percentages of the **total** portfolio and sum to 100.
