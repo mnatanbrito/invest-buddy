@@ -312,6 +312,164 @@ describe('GET /api/history', () => {
   });
 });
 
+describe('POST /api/accounts', () => {
+  it('creates an account and it appears in the portfolio', async () => {
+    const { body } = await request(app)
+      .post('/api/accounts')
+      .send({ label: 'RESP', note: 'For the kid', roomLimitCents: 1_000_000 })
+      .expect(201);
+
+    const portfolio = body as PortfolioState;
+    const created = portfolio.accounts.find((a) => a.label === 'RESP')!;
+    expect(created).toBeDefined();
+    expect(created.note).toBe('For the kid');
+    expect(created.roomLimitCents).toBe(1_000_000);
+    // Example preset already seeds sort orders 1-3, so the new account lands at 4.
+    expect(created.sortOrder).toBe(4);
+  });
+
+  it('rejects an empty label', async () => {
+    const { body } = await request(app).post('/api/accounts').send({ label: '  ' }).expect(400);
+    expect(body.error).toBeTruthy();
+  });
+
+  it('enforces the maximum of 10 accounts', async () => {
+    // The example preset already loads 3; 7 more reaches the cap of 10.
+    for (let i = 0; i < 7; i++) {
+      await request(app)
+        .post('/api/accounts')
+        .send({ label: `Extra ${i}` })
+        .expect(201);
+    }
+
+    const { body } = await request(app).post('/api/accounts').send({ label: 'One too many' }).expect(409);
+    expect(body.error).toMatch(/10/);
+
+    const { rows } = await db.pool.query('SELECT COUNT(*)::int AS n FROM accounts');
+    expect(rows[0].n).toBe(10);
+  });
+});
+
+describe('PATCH /api/accounts/:id', () => {
+  it('updates label without clobbering an existing note', async () => {
+    const before = await request(app).get('/api/portfolio').expect(200);
+    const rrspBefore = (before.body as PortfolioState).accounts.find((a) => a.id === 'rrsp')!;
+    expect(rrspBefore.note).not.toBe('');
+
+    const { body } = await request(app).patch('/api/accounts/rrsp').send({ label: 'New label' }).expect(200);
+    const rrsp = (body as PortfolioState).accounts.find((a) => a.id === 'rrsp')!;
+    expect(rrsp.label).toBe('New label');
+    expect(rrsp.note).toBe(rrspBefore.note);
+  });
+
+  it('updates note without clobbering the label', async () => {
+    const { body } = await request(app)
+      .patch('/api/accounts/rrsp')
+      .send({ note: 'Updated note' })
+      .expect(200);
+    const rrsp = (body as PortfolioState).accounts.find((a) => a.id === 'rrsp')!;
+    expect(rrsp.note).toBe('Updated note');
+    expect(rrsp.label).toBe('RRSP');
+  });
+
+  it('updates roomLimitCents independently', async () => {
+    const { body } = await request(app)
+      .patch('/api/accounts/rrsp')
+      .send({ roomLimitCents: 7_500_000 })
+      .expect(200);
+    const rrsp = (body as PortfolioState).accounts.find((a) => a.id === 'rrsp')!;
+    expect(rrsp.roomLimitCents).toBe(7_500_000);
+    expect(rrsp.label).toBe('RRSP');
+  });
+
+  it('clears an existing room limit with roomLimitCents: null', async () => {
+    const { body } = await request(app)
+      .patch('/api/accounts/rrsp')
+      .send({ roomLimitCents: null })
+      .expect(200);
+    const rrsp = (body as PortfolioState).accounts.find((a) => a.id === 'rrsp')!;
+    expect(rrsp.roomLimitCents).toBeNull();
+  });
+
+  it('moves an account via sortOrder', async () => {
+    // rrsp starts at sortOrder 1; move it after tfsa (sortOrder 2).
+    await request(app).patch('/api/accounts/rrsp').send({ sortOrder: 3 }).expect(200);
+    const { body } = await request(app).get('/api/portfolio').expect(200);
+    const rrsp = (body as PortfolioState).accounts.find((a) => a.id === 'rrsp')!;
+    expect(rrsp.sortOrder).toBe(3);
+  });
+
+  it('404s on an unknown id', async () => {
+    const { body } = await request(app).patch('/api/accounts/nope').send({ label: 'X' }).expect(404);
+    expect(body.error).toBe('no account with that id');
+  });
+
+  it('rejects an empty patch body', async () => {
+    await request(app).patch('/api/accounts/rrsp').send({}).expect(400);
+  });
+});
+
+describe('DELETE /api/accounts/:id', () => {
+  it('deletes a fresh, never-invested account', async () => {
+    const { body: created } = await request(app)
+      .post('/api/accounts')
+      .send({ label: 'Throwaway' })
+      .expect(201);
+    const newId = (created as PortfolioState).accounts.find((a) => a.label === 'Throwaway')!.id;
+
+    await request(app).delete(`/api/accounts/${newId}`).expect(200);
+
+    const { body } = await request(app).get('/api/portfolio').expect(200);
+    expect((body as PortfolioState).accounts.find((a) => a.id === newId)).toBeUndefined();
+  });
+
+  it('refuses to delete an account with nonzero holdings, mentioning the label and amount', async () => {
+    await invest(1_000_000).expect(200);
+
+    const { body } = await request(app).delete('/api/accounts/rrsp').expect(409);
+    expect(body.error).toMatch(/RRSP/);
+    expect(body.error).toMatch(/\$/);
+  });
+
+  it('refuses to delete an account with investment history even once holdings are zeroed', async () => {
+    await invest(1_000_000).expect(200);
+    await request(app)
+      .put('/api/holdings')
+      .send({ holdings: { us_equity_vti: 0, cad_bonds_vab: 0 } })
+      .expect(200);
+
+    const { body } = await request(app).delete('/api/accounts/rrsp').expect(409);
+    expect(body.error).toMatch(/history/);
+  });
+
+  it('404s on an unknown id', async () => {
+    const { body } = await request(app).delete('/api/accounts/nope').expect(404);
+    expect(body.error).toBe('no account with that id');
+  });
+
+  it('cascades away sleeves and assets', async () => {
+    const { rows: before } = await db.pool.query('SELECT COUNT(*)::int AS n FROM sleeves WHERE account_id = $1', [
+      'rrsp',
+    ]);
+    expect(before[0].n).toBeGreaterThan(0);
+
+    await request(app).delete('/api/accounts/rrsp').expect(200);
+
+    const { rows: sleeveRows } = await db.pool.query(
+      'SELECT COUNT(*)::int AS n FROM sleeves WHERE account_id = $1',
+      ['rrsp'],
+    );
+    expect(sleeveRows[0].n).toBe(0);
+    const { rows: assetRows } = await db.pool.query(
+      `SELECT COUNT(*)::int AS n FROM assets ast
+        JOIN sleeves s ON s.id = ast.sleeve_id
+       WHERE s.account_id = $1`,
+      ['rrsp'],
+    );
+    expect(assetRows[0].n).toBe(0);
+  });
+});
+
 describe('POST /api/preview', () => {
   it('reports the same split as investing, without writing anything', async () => {
     const { body: preview } = await request(app)

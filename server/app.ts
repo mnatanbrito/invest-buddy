@@ -1,9 +1,10 @@
+import { randomUUID } from 'node:crypto';
 import express, { type Express, type Request, type Response } from 'express';
 import type { Pool } from 'pg';
 import { z } from 'zod';
 import { withTransaction } from './db/pool';
-import { readPortfolio } from './portfolio';
-import { allocationIssues, toRebalanceUnits } from '../shared/allocation';
+import { deleteBlockers, nextSortOrder, readPortfolio, resequence } from './portfolio';
+import { allocationIssues, MAX_ACCOUNTS, toRebalanceUnits } from '../shared/allocation';
 import { planDeposit } from '../shared/rebalance';
 import type { InvestmentRecord } from '../shared/types';
 
@@ -116,6 +117,22 @@ export function buildUpdate(fields: Record<string, unknown>): { setClause: strin
   return { setClause, values };
 }
 
+const CENTS_FORMAT = new Intl.NumberFormat('en-CA', {
+  style: 'currency',
+  currency: 'CAD',
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+/**
+ * Server-local formatter for one-off error message strings. Deliberately not shared
+ * with the client's `formatCents` (`src/lib/money.ts`) — `server/app.ts` isn't part
+ * of `tsconfig.app.json`'s program, so it can't import from `src/`.
+ */
+function formatCentsForMessage(cents: number): string {
+  return CENTS_FORMAT.format(cents / 100);
+}
+
 /** Wraps a handler so thrown errors become JSON instead of an HTML stack page. */
 const route =
   (handler: (req: Request, res: Response) => Promise<void>) => (req: Request, res: Response) => {
@@ -150,6 +167,96 @@ export function createApp(pool: Pool): Express {
       } finally {
         client.release();
       }
+    }),
+  );
+
+  app.post(
+    '/api/accounts',
+    route(async (req, res) => {
+      const body = accountCreateSchema.parse(req.body);
+      const portfolio = await withTransaction(pool, async (client) => {
+        await client.query('LOCK TABLE accounts, sleeves, assets IN SHARE ROW EXCLUSIVE MODE');
+        const { rows } = await client.query<{ count: number }>(
+          'SELECT COUNT(*)::int AS count FROM accounts',
+        );
+        if (rows[0].count >= MAX_ACCOUNTS) {
+          throw new HttpError(
+            409,
+            `an account can't be created — the portfolio already has the maximum of ${MAX_ACCOUNTS}`,
+          );
+        }
+        const id = randomUUID();
+        const sortOrder = await nextSortOrder(client, 'accounts', null);
+        await client.query(
+          'INSERT INTO accounts (id, label, note, room_limit, sort_order) VALUES ($1, $2, $3, $4, $5)',
+          [id, body.label, body.note, body.roomLimitCents, sortOrder],
+        );
+        return readPortfolio(client);
+      });
+      res.status(201).json(portfolio);
+    }),
+  );
+
+  app.patch(
+    '/api/accounts/:id',
+    route(async (req, res) => {
+      const patch = accountPatchSchema.parse(req.body);
+      const accountId = idSchema.parse(req.params.id);
+      const portfolio = await withTransaction(pool, async (client) => {
+        await client.query('LOCK TABLE accounts, sleeves, assets IN SHARE ROW EXCLUSIVE MODE');
+        const { rows } = await client.query('SELECT 1 FROM accounts WHERE id = $1', [accountId]);
+        if (rows.length === 0) throw new HttpError(404, 'no account with that id');
+
+        const { sortOrder, ...rest } = patch;
+        if (sortOrder !== undefined) {
+          await resequence(client, 'accounts', accountId, sortOrder);
+        }
+        const columns: Record<string, unknown> = {};
+        if (rest.label !== undefined) columns.label = rest.label;
+        if (rest.note !== undefined) columns.note = rest.note;
+        if (rest.roomLimitCents !== undefined) columns.room_limit = rest.roomLimitCents;
+        if (Object.keys(columns).length > 0) {
+          const { setClause, values } = buildUpdate(columns);
+          await client.query(`UPDATE accounts SET ${setClause} WHERE id = $${values.length + 1}`, [
+            ...values,
+            accountId,
+          ]);
+        }
+        return readPortfolio(client);
+      });
+      res.json(portfolio);
+    }),
+  );
+
+  app.delete(
+    '/api/accounts/:id',
+    route(async (req, res) => {
+      const accountId = idSchema.parse(req.params.id);
+      const portfolio = await withTransaction(pool, async (client) => {
+        await client.query('LOCK TABLE accounts, sleeves, assets IN SHARE ROW EXCLUSIVE MODE');
+        const { rows } = await client.query<{ label: string }>('SELECT label FROM accounts WHERE id = $1', [
+          accountId,
+        ]);
+        if (rows.length === 0) throw new HttpError(404, 'no account with that id');
+        const label = rows[0].label;
+
+        const { holdingCents, hasHistory } = await deleteBlockers(client, 'account', accountId);
+        if (holdingCents > 0) {
+          throw new HttpError(
+            409,
+            `${label} holds ${formatCentsForMessage(holdingCents)} across its sleeves — move or zero out its holdings before deleting.`,
+          );
+        }
+        if (hasHistory) {
+          throw new HttpError(
+            409,
+            `${label} has past investments recorded — delete isn't allowed once an account has investment history.`,
+          );
+        }
+        await client.query('DELETE FROM accounts WHERE id = $1', [accountId]);
+        return readPortfolio(client);
+      });
+      res.json(portfolio);
     }),
   );
 
