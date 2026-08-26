@@ -73,7 +73,7 @@ export const accountCreateSchema = z.object({
 export const accountPatchSchema = z
   .object({
     label: labelSchema.optional(),
-    note: noteSchema,
+    note: z.string().trim().max(500).optional(),
     roomLimitCents: centsSchema.nullable().optional(),
     sortOrder: sortSchema.optional(),
   })
