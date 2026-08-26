@@ -43,10 +43,6 @@ const depositSchema = z.object({
     .positive('enter an amount greater than zero'),
 });
 
-const roomSchema = z.object({
-  roomLimitCents: centsSchema.nullable(),
-});
-
 const holdingsSchema = z.object({
   holdings: z.record(z.string(), centsSchema),
 });
@@ -475,6 +471,7 @@ export function createApp(pool: Pool): Express {
     '/api/presets/example',
     route(async (_req, res) => {
       const portfolio = await withTransaction(pool, async (client) => {
+        await client.query('LOCK TABLE accounts, sleeves, assets IN SHARE ROW EXCLUSIVE MODE');
         const { rows } = await client.query<{ count: number }>('SELECT COUNT(*)::int AS count FROM accounts');
         if (rows[0].count > 0) {
           throw new HttpError(409, 'the example portfolio can only be loaded into an empty portfolio');
@@ -582,27 +579,6 @@ export function createApp(pool: Pool): Express {
     }),
   );
 
-  app.put(
-    '/api/accounts/:id/room',
-    route(async (req, res) => {
-      const { roomLimitCents } = roomSchema.parse(req.body);
-      const client = await pool.connect();
-      try {
-        const { rowCount } = await client.query(
-          'UPDATE accounts SET room_limit = $1 WHERE id = $2 AND room_limit IS NOT NULL',
-          [roomLimitCents, req.params.id],
-        );
-        if (rowCount === 0) {
-          res.status(404).json({ error: 'no registered account with that id' });
-          return;
-        }
-        res.json(await readPortfolio(client));
-      } finally {
-        client.release();
-      }
-    }),
-  );
-
   /** Set opening balances for a portfolio that already exists outside this app. */
   app.put(
     '/api/holdings',
@@ -614,7 +590,7 @@ export function createApp(pool: Pool): Express {
             cents,
             assetId,
           ]);
-          if (rowCount === 0) throw new Error(`unknown asset: ${assetId}`);
+          if (rowCount === 0) throw new HttpError(404, `unknown asset: ${assetId}`);
         }
         return readPortfolio(client);
       });

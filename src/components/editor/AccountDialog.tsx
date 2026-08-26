@@ -30,13 +30,19 @@ const toField = (cents: number) => (cents / 100).toFixed(2);
 
 /**
  * A blank field means "unlimited" (`null`), which is a meaningful value for
- * an account's contribution room (e.g. the non-registered account). Anything
- * else that fails to parse is a genuine typo.
+ * an account's contribution room (e.g. the non-registered account). A field
+ * that's present but zero is also meaningful — e.g. a registered account with
+ * no room left this year — and distinct from blank/unlimited, so it's handled
+ * the same way `AssetDialog`'s `parseHoldingToCents` handles a zero holding.
+ * Anything else that fails to parse is a genuine typo.
  */
 function parseRoomLimitToCents(raw: string): number | null {
   const parsed = parseAmountToCents(raw);
   if (parsed.cents !== null) return parsed.cents;
-  if (raw.trim() === '') return null;
+
+  const normalized = raw.replace(/[$,\s]/g, '').trim();
+  if (normalized === '') return null;
+  if (Number(normalized) === 0) return 0;
   throw new Error(`Contribution room: ${parsed.error ?? 'not a valid amount'}`);
 }
 

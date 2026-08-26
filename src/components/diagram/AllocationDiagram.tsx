@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import type { AllocationLine, AllocationPlan, PortfolioState } from '@shared/types';
 import { formatBps, formatCentsShort, formatDriftBps } from '@/lib/money';
-import { layoutDiagram, type AssetRowGeometry, type BoxGeometry } from './layout';
+import { layoutDiagram, MIN_CANVAS_WIDTH, type AssetRowGeometry, type BoxGeometry } from './layout';
 
 export interface DiagramFlight {
   /** Bumped on every execution so React remounts the tokens and replays the animation. */
@@ -17,7 +17,8 @@ interface AllocationDiagramProps {
   flight: DiagramFlight | null;
 }
 
-/** Naive greedy wrap; the notes are short and fixed, so this is all they need. */
+/** Naive greedy wrap. Notes are free user text up to 500 chars, so callers must cap
+ *  the number of rendered lines themselves (the panel only budgets room for a few). */
 function wrap(text: string, maxChars: number): string[] {
   const lines: string[] = [];
   let current = '';
@@ -85,7 +86,7 @@ export function AllocationDiagram({ portfolio, preview, flight }: AllocationDiag
     ? `Target allocation across ${accountListFormatter.format(accountLabels)}`
     : 'Target allocation across your accounts';
 
-  const wide = canvas.width > 1000;
+  const wide = canvas.width > MIN_CANVAS_WIDTH;
 
   return (
     <div className="overflow-x-auto">
@@ -109,7 +110,7 @@ export function AllocationDiagram({ portfolio, preview, flight }: AllocationDiag
         {panels.map((panel, panelIndex) => {
           const { account } = panel;
           const exhausted = account.roomRemainingCents === 0;
-          const noteLines = wrap(account.note, 30);
+          const noteLines = wrap(account.note, 30).slice(0, 3);
 
           return (
             <g key={account.id} className={panelColorClass(panelIndex)}>
@@ -171,7 +172,7 @@ export function AllocationDiagram({ portfolio, preview, flight }: AllocationDiag
 
               {noteLines.map((line, index) => (
                 <text
-                  key={line}
+                  key={index}
                   x={panel.centerX}
                   y={panel.y + panel.height - 48 + index * 19}
                   textAnchor="middle"

@@ -20,7 +20,7 @@ export interface Asset {
   sleeveId: string;
   ticker: string;
   label: string;
-  /** Target share of the parent sleeve, in basis points. An sleeve's assets sum to 10000. */
+  /** Target share of the parent sleeve, in basis points. A sleeve's assets sum to 10000. */
   weightBps: number;
   holdingCents: number;
   /** Display-only: floor(sleeve.targetBps * weightBps / 10000). */

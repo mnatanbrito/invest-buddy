@@ -139,7 +139,7 @@ export default function App() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Invest Buddy</h1>
           <p className="text-sm text-muted-foreground">
-            Drift-aware rebalancing across your RRSP, TFSA and non-registered accounts.
+            Drift-aware rebalancing across your accounts.
           </p>
         </div>
         <div className="flex items-center gap-4">
@@ -255,7 +255,7 @@ export default function App() {
 
             {preview && preview.unallocatedCents === 0 && (
               <p className="text-sm text-muted-foreground">
-                All {formatCents(preview.requestedCents)} fits. Amounts flow to whichever sleeves sit
+                All {formatCents(preview.requestedCents)} fits. Amounts flow to whichever assets sit
                 furthest below their target.
               </p>
             )}
@@ -263,7 +263,7 @@ export default function App() {
             {lastPlan && !preview && (
               <p className="text-sm text-muted-foreground">
                 Last investment: {formatCents(lastPlan.allocatedCents)} allocated across{' '}
-                {lastPlan.lines.filter((line) => line.amountCents > 0).length} sleeves.
+                {lastPlan.lines.filter((line) => line.amountCents > 0).length} assets.
               </p>
             )}
 

@@ -131,11 +131,12 @@ export async function resequence(
 }
 
 export async function readPortfolio(client: PoolClient): Promise<PortfolioState> {
-  const [accountsResult, sleevesResult, assetsResult] = await Promise.all([
-    client.query<AccountRow>(ACCOUNTS_QUERY),
-    client.query<SleeveRow>(SLEEVES_QUERY),
-    client.query<AssetRow>(ASSETS_QUERY),
-  ]);
+  // Sequential, not Promise.all: concurrent queries on a single pg PoolClient are
+  // deprecated (removed in pg@9), and a single Postgres connection serializes them
+  // anyway, so there's no concurrency to gain.
+  const accountsResult = await client.query<AccountRow>(ACCOUNTS_QUERY);
+  const sleevesResult = await client.query<SleeveRow>(SLEEVES_QUERY);
+  const assetsResult = await client.query<AssetRow>(ASSETS_QUERY);
 
   const totalCents = assetsResult.rows.reduce((sum, row) => sum + row.holding_cents, 0);
 

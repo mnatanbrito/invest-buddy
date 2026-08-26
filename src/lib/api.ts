@@ -55,12 +55,6 @@ export const api = {
 
   undo: () => request<PortfolioState>('/api/undo', { method: 'POST' }),
 
-  setRoom: (accountId: string, roomLimitCents: number) =>
-    request<PortfolioState>(`/api/accounts/${accountId}/room`, {
-      method: 'PUT',
-      body: JSON.stringify({ roomLimitCents }),
-    }),
-
   setHoldings: (holdings: Record<string, number>) =>
     request<PortfolioState>('/api/holdings', {
       method: 'PUT',

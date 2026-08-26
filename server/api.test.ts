@@ -227,33 +227,6 @@ describe('POST /api/undo', () => {
   });
 });
 
-describe('PUT /api/accounts/:id/room', () => {
-  it('updates a registered account and recomputes remaining room', async () => {
-    await invest(1_000_000).expect(200);
-    const { body } = await request(app)
-      .put('/api/accounts/rrsp/room')
-      .send({ roomLimitCents: 9_900_000 })
-      .expect(200);
-
-    const rrsp = (body as PortfolioState).accounts.find((a) => a.id === 'rrsp')!;
-    expect(rrsp.roomLimitCents).toBe(9_900_000);
-    expect(rrsp.roomRemainingCents).toBe(9_900_000 - rrsp.roomUsedCents);
-  });
-
-  it('refuses to set a limit on the unlimited non-registered account', async () => {
-    const { body } = await request(app)
-      .put('/api/accounts/non_registered/room')
-      .send({ roomLimitCents: 100 })
-      .expect(404);
-    expect(body.error).toBe('no registered account with that id');
-  });
-
-  it('404s on an unknown account and rejects a negative limit', async () => {
-    await request(app).put('/api/accounts/nope/room').send({ roomLimitCents: 100 }).expect(404);
-    await request(app).put('/api/accounts/rrsp/room').send({ roomLimitCents: -1 }).expect(400);
-  });
-});
-
 describe('PUT /api/holdings', () => {
   it('sets opening balances', async () => {
     const { body } = await request(app)
@@ -271,7 +244,7 @@ describe('PUT /api/holdings', () => {
     await request(app)
       .put('/api/holdings')
       .send({ holdings: { us_equity_vti: 999_999, not_an_asset: 1_000 } })
-      .expect(500);
+      .expect(404);
 
     const { body } = await request(app).get('/api/portfolio').expect(200);
     const usEquity = (body as PortfolioState).sleeves
@@ -397,6 +370,31 @@ describe('PATCH /api/accounts/:id', () => {
     const { body } = await request(app).get('/api/portfolio').expect(200);
     const rrsp = (body as PortfolioState).accounts.find((a) => a.id === 'rrsp')!;
     expect(rrsp.sortOrder).toBe(3);
+  });
+
+  it('reorders the account list with the two-PATCH swap the UI issues', async () => {
+    // Mirrors moveSortOrder (src/lib/editor.ts): swap rrsp (sortOrder 1) and tfsa
+    // (sortOrder 2) by PATCHing the moving item first, then its sibling — using the
+    // second (sibling's) response as authoritative, same as AccountCard.tsx does.
+    const before = await request(app).get('/api/portfolio').expect(200);
+    const accountsBefore = (before.body as PortfolioState).accounts;
+    const rrspBefore = accountsBefore.find((a) => a.id === 'rrsp')!;
+    const tfsaBefore = accountsBefore.find((a) => a.id === 'tfsa')!;
+
+    await request(app)
+      .patch(`/api/accounts/${rrspBefore.id}`)
+      .send({ sortOrder: tfsaBefore.sortOrder })
+      .expect(200);
+    const { body } = await request(app)
+      .patch(`/api/accounts/${tfsaBefore.id}`)
+      .send({ sortOrder: rrspBefore.sortOrder })
+      .expect(200);
+
+    expect((body as PortfolioState).accounts.map((a) => a.id)).toEqual([
+      'tfsa',
+      'rrsp',
+      'non_registered',
+    ]);
   });
 
   it('404s on an unknown id', async () => {
@@ -556,6 +554,31 @@ describe('PATCH /api/sleeves/:id', () => {
     const { body } = await request(app).get('/api/portfolio').expect(200);
     const sleeve = (body as PortfolioState).sleeves.find((s) => s.id === 'us_equity')!;
     expect(sleeve.sortOrder).toBe(2);
+  });
+
+  it('reorders sleeves within an account with the two-PATCH swap the UI issues', async () => {
+    // Mirrors moveSortOrder (src/lib/editor.ts): swap us_equity (sortOrder 1) and
+    // cad_bonds (sortOrder 2), both under rrsp, by PATCHing the moving item first,
+    // then its sibling — using the second (sibling's) response as authoritative,
+    // same as SleeveRow.tsx does.
+    const before = await request(app).get('/api/portfolio').expect(200);
+    const sleevesBefore = (before.body as PortfolioState).sleeves;
+    const usEquityBefore = sleevesBefore.find((s) => s.id === 'us_equity')!;
+    const cadBondsBefore = sleevesBefore.find((s) => s.id === 'cad_bonds')!;
+
+    await request(app)
+      .patch(`/api/sleeves/${usEquityBefore.id}`)
+      .send({ sortOrder: cadBondsBefore.sortOrder })
+      .expect(200);
+    const { body } = await request(app)
+      .patch(`/api/sleeves/${cadBondsBefore.id}`)
+      .send({ sortOrder: usEquityBefore.sortOrder })
+      .expect(200);
+
+    const rrspSleeveIds = (body as PortfolioState).sleeves
+      .filter((s) => s.accountId === 'rrsp')
+      .map((s) => s.id);
+    expect(rrspSleeveIds).toEqual(['cad_bonds', 'us_equity']);
   });
 
   it('404s on an unknown id', async () => {
@@ -741,16 +764,50 @@ describe('PATCH /api/assets/:id', () => {
     expect(body.error).toMatch(/ITOT/);
   });
 
-  it('moves an asset via sortOrder', async () => {
-    await request(app)
+  it('moves an asset via sortOrder, resolving a resulting sort_order tie by id', async () => {
+    // EXTRA is created after us_equity_vti, so it lands at sort_order 2 (next past
+    // the sleeve's current max). PATCHing us_equity_vti to sortOrder 2 then leaves
+    // both assets at sort_order 2 — readPortfolio's ASSETS_QUERY breaks that tie by
+    // `ast.id`, and EXTRA's randomUUID id is always lexicographically less than the
+    // literal string "us_equity_vti" (UUID chars are only 0-9/a-f/'-', all < 'u'),
+    // so EXTRA deterministically sorts first once the tie happens.
+    const { body: created } = await request(app)
       .post('/api/assets')
       .send({ sleeveId: 'us_equity', ticker: 'EXTRA', weightBps: 100 })
       .expect(201);
+    const extraId = (created as PortfolioState).sleeves
+      .flatMap((s) => s.assets)
+      .find((a) => a.ticker === 'EXTRA')!.id;
 
     await request(app).patch('/api/assets/us_equity_vti').send({ sortOrder: 2 }).expect(200);
     const { body } = await request(app).get('/api/portfolio').expect(200);
-    const asset = (body as PortfolioState).sleeves.flatMap((s) => s.assets).find((a) => a.id === 'us_equity_vti')!;
-    expect(asset.sortOrder).toBe(2);
+    const usEquityAssets = (body as PortfolioState).sleeves.find((s) => s.id === 'us_equity')!.assets;
+
+    expect(usEquityAssets.map((a) => a.id)).toEqual([extraId, 'us_equity_vti']);
+    expect(usEquityAssets.map((a) => a.sortOrder)).toEqual([2, 2]);
+  });
+
+  it('reorders assets within a sleeve with the two-PATCH swap the UI issues', async () => {
+    // Mirrors moveSortOrder (src/lib/editor.ts): swap two siblings within us_equity
+    // by PATCHing the moving item first, then its sibling — using the second
+    // (sibling's) response as authoritative, same as AssetRow.tsx does. Unlike the
+    // test above, this leaves no sort_order tie: the swap is clean.
+    const { body: created } = await request(app)
+      .post('/api/assets')
+      .send({ sleeveId: 'us_equity', ticker: 'SECOND', weightBps: 100 })
+      .expect(201);
+    const secondId = (created as PortfolioState).sleeves
+      .flatMap((s) => s.assets)
+      .find((a) => a.ticker === 'SECOND')!.id;
+
+    // us_equity_vti is sortOrder 1, SECOND is sortOrder 2.
+    await request(app).patch('/api/assets/us_equity_vti').send({ sortOrder: 2 }).expect(200);
+    const { body } = await request(app).patch(`/api/assets/${secondId}`).send({ sortOrder: 1 }).expect(200);
+
+    const usEquityAssetIds = (body as PortfolioState).sleeves
+      .find((s) => s.id === 'us_equity')!
+      .assets.map((a) => a.id);
+    expect(usEquityAssetIds).toEqual([secondId, 'us_equity_vti']);
   });
 
   it('404s on an unknown id', async () => {

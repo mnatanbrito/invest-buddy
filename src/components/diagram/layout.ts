@@ -35,7 +35,7 @@ const PANEL_TOP = 8;
 /** Extra room below the tallest panel for the flow-origin token launch point. */
 const FLOW_ORIGIN_CLEARANCE = 70;
 /** Canvas never renders narrower than this, so a single account isn't a sliver. */
-const MIN_CANVAS_WIDTH = 1000;
+export const MIN_CANVAS_WIDTH = 1000;
 
 export interface AssetRowGeometry {
   asset: Asset;
