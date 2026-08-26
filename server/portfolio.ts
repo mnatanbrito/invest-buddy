@@ -48,6 +48,23 @@ const ACCOUNTS_QUERY = `
    ORDER BY a.sort_order, a.id
 `;
 
+/** Sleeves ordered through their parent account first, so the flat list stays grouped by account. */
+const SLEEVES_QUERY = `
+  SELECT s.id, s.account_id, s.label, s.target_bps, s.sort_order
+    FROM sleeves s
+    JOIN accounts a ON a.id = s.account_id
+   ORDER BY a.sort_order, a.id, s.sort_order, s.id
+`;
+
+/** Assets ordered through their parent sleeve and account, so the flat list stays grouped. */
+const ASSETS_QUERY = `
+  SELECT ast.id, ast.sleeve_id, ast.ticker, ast.label, ast.weight_bps, ast.holding_cents, ast.sort_order
+    FROM assets ast
+    JOIN sleeves s ON s.id = ast.sleeve_id
+    JOIN accounts a ON a.id = s.account_id
+   ORDER BY a.sort_order, a.id, s.sort_order, s.id, ast.sort_order, ast.id
+`;
+
 export type EntityKind = 'account' | 'sleeve' | 'asset';
 
 export interface DeleteBlock {
@@ -106,8 +123,8 @@ export async function nextSortOrder(
 export async function readPortfolio(client: PoolClient): Promise<PortfolioState> {
   const [accountsResult, sleevesResult, assetsResult] = await Promise.all([
     client.query<AccountRow>(ACCOUNTS_QUERY),
-    client.query<SleeveRow>('SELECT * FROM sleeves ORDER BY sort_order, id'),
-    client.query<AssetRow>('SELECT * FROM assets ORDER BY sort_order, id'),
+    client.query<SleeveRow>(SLEEVES_QUERY),
+    client.query<AssetRow>(ASSETS_QUERY),
   ]);
 
   const totalCents = assetsResult.rows.reduce((sum, row) => sum + row.holding_cents, 0);
