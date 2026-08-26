@@ -13,9 +13,9 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 
-interface DeleteEntityButtonProps {
-  /** e.g. "Delete RRSP" — used as both the trigger's accessible name and the confirm dialog's context. */
-  label: string;
+export interface DeleteEntityButtonProps {
+  /** e.g. "RRSP" — the bare entity name; the component composes "Delete {entityLabel}" itself. */
+  entityLabel: string;
   /** Caller supplies the actual api.deleteX(id) call. */
   onDelete: () => Promise<void>;
 }
@@ -26,25 +26,29 @@ interface DeleteEntityButtonProps {
  * as `SettingsDialog`), so a cancelled or failed attempt never leaves stale
  * error state behind the next time the dialog opens.
  */
-export function DeleteEntityButton({ label, onDelete }: DeleteEntityButtonProps) {
+export function DeleteEntityButton({ entityLabel, onDelete }: DeleteEntityButtonProps) {
   const [open, setOpen] = useState(false);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="icon-sm" aria-label={label}>
+        <Button variant="ghost" size="icon-sm" aria-label={`Delete ${entityLabel}`}>
           <Trash2Icon />
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-sm">
-        <ConfirmDeleteForm label={label} onDelete={onDelete} onDone={() => setOpen(false)} />
+        <ConfirmDeleteForm
+          entityLabel={entityLabel}
+          onDelete={onDelete}
+          onDone={() => setOpen(false)}
+        />
       </DialogContent>
     </Dialog>
   );
 }
 
 function ConfirmDeleteForm({
-  label,
+  entityLabel,
   onDelete,
   onDone,
 }: DeleteEntityButtonProps & { onDone: () => void }) {
@@ -78,7 +82,7 @@ function ConfirmDeleteForm({
   return (
     <>
       <DialogHeader>
-        <DialogTitle>{label}?</DialogTitle>
+        <DialogTitle>Delete {entityLabel}?</DialogTitle>
         <DialogDescription>This can&apos;t be undone.</DialogDescription>
       </DialogHeader>
 
