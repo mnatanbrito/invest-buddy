@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
-import type { AllocationPlan, PortfolioState } from '@shared/types';
+import type { AllocationLine, AllocationPlan, PortfolioState } from '@shared/types';
 import { formatBps, formatCentsShort, formatDriftBps } from '@/lib/money';
-import { CANVAS, FLOW_ORIGIN, layoutDiagram, type BoxGeometry } from './layout';
+import { layoutDiagram, MIN_CANVAS_WIDTH, type AssetRowGeometry, type BoxGeometry } from './layout';
 
 export interface DiagramFlight {
   /** Bumped on every execution so React remounts the tokens and replays the animation. */
@@ -17,7 +17,8 @@ interface AllocationDiagramProps {
   flight: DiagramFlight | null;
 }
 
-/** Naive greedy wrap; the notes are short and fixed, so this is all they need. */
+/** Naive greedy wrap. Notes are free user text up to 500 chars, so callers must cap
+ *  the number of rendered lines themselves (the panel only budgets room for a few). */
 function wrap(text: string, maxChars: number): string[] {
   const lines: string[] = [];
   let current = '';
@@ -33,166 +34,200 @@ function wrap(text: string, maxChars: number): string[] {
   return lines;
 }
 
+const accountListFormatter = new Intl.ListFormat('en-CA', { style: 'long', type: 'conjunction' });
+
+/** Number of `.acct-color-N` slots defined in src/index.css; panel color cycles past this. */
+const PALETTE_SIZE = 10;
+
+/** Panels are colored by their INDEX (position in the accounts array), not by account id —
+ *  account ids are random UUIDs once created through the editor, so there's no way to key a
+ *  fixed CSS class off them the way the original 3-account preset's ids ('rrsp'/'tfsa'/
+ *  'non_registered') allowed. */
+function panelColorClass(index: number): string {
+  return `acct-color-${index % PALETTE_SIZE}`;
+}
+
 export function AllocationDiagram({ portfolio, preview, flight }: AllocationDiagramProps) {
-  const panels = useMemo(
+  const layout = useMemo(
     () => layoutDiagram(portfolio.accounts, portfolio.sleeves),
     [portfolio.accounts, portfolio.sleeves],
   );
+  const { canvas, flowOrigin, panels } = layout;
 
-  const previewBySleeve = useMemo(
-    () => new Map((preview?.lines ?? []).map((line) => [line.sleeveId, line])),
+  const previewByAsset = useMemo(
+    () => new Map((preview?.lines ?? []).map((line) => [line.assetId, line])),
     [preview],
   );
 
-  const boxesById = useMemo(() => {
-    const map = new Map<string, BoxGeometry>();
-    for (const panel of panels) for (const box of panel.boxes) map.set(box.sleeve.id, box);
+  const rowsById = useMemo(() => {
+    const map = new Map<string, AssetRowGeometry>();
+    for (const panel of panels) {
+      for (const box of panel.boxes) {
+        for (const row of box.rows) map.set(row.asset.id, row);
+      }
+    }
     return map;
   }, [panels]);
 
-  /** Only sleeves that actually received money get a token and a pulse. */
+  /** Account id -> its panel's index, so flow tokens (keyed by accountId) can be colored
+   *  the same way panels are: by position, not by the account's (possibly random) id. */
+  const panelIndexByAccountId = useMemo(() => {
+    const map = new Map<string, number>();
+    panels.forEach((panel, index) => map.set(panel.account.id, index));
+    return map;
+  }, [panels]);
+
+  /** Only assets that actually received money get a token and a pulse. */
   const flownLines = (flight?.plan.lines ?? []).filter((line) => line.amountCents > 0);
-  const flightDelay = new Map(flownLines.map((line, index) => [line.sleeveId, index * 0.07]));
+  const flightDelay = new Map(flownLines.map((line, index) => [line.assetId, index * 0.07]));
+
+  const accountLabels = portfolio.accounts.map((account) => account.label);
+  const ariaLabel = accountLabels.length > 0
+    ? `Target allocation across ${accountListFormatter.format(accountLabels)}`
+    : 'Target allocation across your accounts';
+
+  const wide = canvas.width > MIN_CANVAS_WIDTH;
 
   return (
-    <svg
-      viewBox={`0 0 ${CANVAS.width} ${CANVAS.height}`}
-      className="w-full h-auto select-none"
-      role="img"
-      aria-label="Target allocation across RRSP, TFSA and non-registered accounts"
-    >
-      <title>Target allocation by account</title>
+    <div className="overflow-x-auto">
+      <svg
+        viewBox={`0 0 ${canvas.width} ${canvas.height}`}
+        width={wide ? canvas.width : undefined}
+        className={wide ? 'h-auto select-none' : 'w-full h-auto select-none'}
+        role="img"
+        aria-label={ariaLabel}
+      >
+        <title>Target allocation by account</title>
 
-      <defs>
-        {/* Marks boxes in an account whose contribution room is used up. */}
-        <pattern id="room-exhausted-hatch" width="8" height="8" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
-          <rect width="8" height="8" fill="transparent" />
-          <line x1="0" y1="0" x2="0" y2="8" stroke="currentColor" strokeWidth="3" opacity="0.13" />
-        </pattern>
-      </defs>
+        <defs>
+          {/* Marks boxes in an account whose contribution room is used up. */}
+          <pattern id="room-exhausted-hatch" width="8" height="8" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+            <rect width="8" height="8" fill="transparent" />
+            <line x1="0" y1="0" x2="0" y2="8" stroke="currentColor" strokeWidth="3" opacity="0.13" />
+          </pattern>
+        </defs>
 
-      {panels.map((panel) => {
-        const { account } = panel;
-        const exhausted = account.roomRemainingCents === 0;
-        const accountHoldings = panel.boxes.reduce((sum, box) => sum + box.sleeve.holdingCents, 0);
-        const noteLines = wrap(account.note, 30);
+        {panels.map((panel, panelIndex) => {
+          const { account } = panel;
+          const exhausted = account.roomRemainingCents === 0;
+          const noteLines = wrap(account.note, 30).slice(0, 3);
 
-        return (
-          <g key={account.id} className={`acct-${account.id}`}>
-            <rect
-              x={panel.x}
-              y={panel.y}
-              width={panel.width}
-              height={panel.height}
-              rx={20}
-              fill="var(--panel-fill)"
-              stroke="var(--panel-stroke)"
-              strokeWidth={1.5}
-            />
-
-            <text
-              x={panel.centerX}
-              y={panel.y + 40}
-              textAnchor="middle"
-              fontSize={23}
-              fontWeight={650}
-              fill="var(--ink-strong)"
-            >
-              {account.label}
-            </text>
-            <text x={panel.centerX} y={panel.y + 64} textAnchor="middle" fontSize={14} fill="var(--ink)">
-              {formatBps(panel.targetBps)} of portfolio
-            </text>
-
-            {/* Contribution room chip. Non-registered has no limit, so it shows nothing. */}
-            {account.roomRemainingCents !== null && (
-              <RoomChip
-                centerX={panel.centerX}
-                y={panel.y + 78}
-                remainingCents={account.roomRemainingCents}
-                exhausted={exhausted}
+          return (
+            <g key={account.id} className={panelColorClass(panelIndex)}>
+              <rect
+                x={panel.x}
+                y={panel.y}
+                width={panel.width}
+                height={panel.height}
+                rx={20}
+                fill="var(--panel-fill)"
+                stroke="var(--panel-stroke)"
+                strokeWidth={1.5}
               />
-            )}
 
-            {panel.boxes.map((box) => (
-              <SleeveBox
-                key={box.sleeve.id}
-                box={box}
-                exhausted={exhausted}
-                previewCents={previewBySleeve.get(box.sleeve.id)?.amountCents ?? 0}
-                previewBlockedCents={previewBySleeve.get(box.sleeve.id)?.blockedCents ?? 0}
-                receiving={flightDelay.has(box.sleeve.id)}
-                delay={flightDelay.get(box.sleeve.id) ?? 0}
-              />
-            ))}
-
-            <text
-              x={panel.centerX}
-              y={panel.y + panel.height - 92}
-              textAnchor="middle"
-              fontSize={13}
-              fill="var(--ink)"
-              fontWeight={600}
-            >
-              {formatCentsShort(accountHoldings)} held
-            </text>
-
-            {noteLines.map((line, index) => (
               <text
-                key={line}
                 x={panel.centerX}
-                y={panel.y + panel.height - 48 + index * 19}
+                y={panel.y + 40}
                 textAnchor="middle"
-                fontSize={13.5}
-                fill="var(--diagram-note)"
+                fontSize={23}
+                fontWeight={650}
+                fill="var(--ink-strong)"
               >
-                {line}
+                {account.label}
               </text>
-            ))}
-          </g>
-        );
-      })}
+              <text x={panel.centerX} y={panel.y + 64} textAnchor="middle" fontSize={14} fill="var(--ink)">
+                {formatBps(panel.targetBps)} of portfolio
+              </text>
 
-      {/* Money in flight: one token per funded sleeve, launched from under the input. */}
-      {flight && (
-        <g key={flight.key}>
-          {flownLines.map((line) => {
-            const box = boxesById.get(line.sleeveId);
-            if (!box) return null;
-            return (
-              <g
-                key={line.sleeveId}
-                transform={`translate(${FLOW_ORIGIN.x}, ${FLOW_ORIGIN.y})`}
-                className={`acct-${line.accountId}`}
+              {/* Contribution room chip. Non-registered has no limit, so it shows nothing. */}
+              {account.roomRemainingCents !== null && (
+                <RoomChip
+                  centerX={panel.centerX}
+                  y={panel.y + 78}
+                  remainingCents={account.roomRemainingCents}
+                  exhausted={exhausted}
+                />
+              )}
+
+              {panel.boxes.map((box) => (
+                <SleeveBox
+                  key={box.sleeve.id}
+                  box={box}
+                  exhausted={exhausted}
+                  previewByAsset={previewByAsset}
+                  flightDelay={flightDelay}
+                />
+              ))}
+
+              <text
+                x={panel.centerX}
+                y={panel.y + panel.height - 92}
+                textAnchor="middle"
+                fontSize={13}
+                fill="var(--ink)"
+                fontWeight={600}
               >
-                <g
-                  className="flow-token"
-                  style={
-                    {
-                      '--dx': `${box.centerX - FLOW_ORIGIN.x}px`,
-                      '--dy': `${box.centerY - FLOW_ORIGIN.y}px`,
-                      '--delay': `${flightDelay.get(line.sleeveId) ?? 0}s`,
-                    } as React.CSSProperties
-                  }
+                {formatCentsShort(panel.holdingCents)} held
+              </text>
+
+              {noteLines.map((line, index) => (
+                <text
+                  key={index}
+                  x={panel.centerX}
+                  y={panel.y + panel.height - 48 + index * 19}
+                  textAnchor="middle"
+                  fontSize={13.5}
+                  fill="var(--diagram-note)"
                 >
-                  <rect x={-46} y={-14} width={92} height={28} rx={14} fill="var(--box-stroke)" />
-                  <text
-                    x={0}
-                    y={5}
-                    textAnchor="middle"
-                    fontSize={14}
-                    fontWeight={650}
-                    fill="#ffffff"
+                  {line}
+                </text>
+              ))}
+            </g>
+          );
+        })}
+
+        {/* Money in flight: one token per funded asset, launched from under the input. */}
+        {flight && (
+          <g key={flight.key}>
+            {flownLines.map((line) => {
+              const row = rowsById.get(line.assetId);
+              if (!row) return null;
+              const panelIndex = panelIndexByAccountId.get(line.accountId) ?? 0;
+              return (
+                <g
+                  key={line.assetId}
+                  transform={`translate(${flowOrigin.x}, ${flowOrigin.y})`}
+                  className={panelColorClass(panelIndex)}
+                >
+                  <g
+                    className="flow-token"
+                    style={
+                      {
+                        '--dx': `${row.centerX - flowOrigin.x}px`,
+                        '--dy': `${row.centerY - flowOrigin.y}px`,
+                        '--delay': `${flightDelay.get(line.assetId) ?? 0}s`,
+                      } as React.CSSProperties
+                    }
                   >
-                    {formatCentsShort(line.amountCents)}
-                  </text>
+                    <rect x={-46} y={-14} width={92} height={28} rx={14} fill="var(--box-stroke)" />
+                    <text
+                      x={0}
+                      y={5}
+                      textAnchor="middle"
+                      fontSize={14}
+                      fontWeight={650}
+                      fill="#ffffff"
+                    >
+                      {formatCentsShort(line.amountCents)}
+                    </text>
+                  </g>
                 </g>
-              </g>
-            );
-          })}
-        </g>
-      )}
-    </svg>
+              );
+            })}
+          </g>
+        )}
+      </svg>
+    </div>
   );
 }
 
@@ -246,44 +281,18 @@ function RoomChip({
 function SleeveBox({
   box,
   exhausted,
-  previewCents,
-  previewBlockedCents,
-  receiving,
-  delay,
+  previewByAsset,
+  flightDelay,
 }: {
   box: BoxGeometry;
   exhausted: boolean;
-  previewCents: number;
-  previewBlockedCents: number;
-  receiving: boolean;
-  delay: number;
+  previewByAsset: Map<string, AllocationLine>;
+  flightDelay: Map<string, number>;
 }) {
   const { sleeve, x, y, width, height } = box;
-  const delayStyle = { '--delay': `${delay}s` } as React.CSSProperties;
-
-  // Drift bar: the track is the target weight, the fill is the actual weight,
-  // so a short fill reads as underweight and an overfull one as overweight.
-  const barWidth = width - 36;
-  const driftRatio = sleeve.targetBps > 0 ? Math.min(2, sleeve.actualBps / sleeve.targetBps) : 0;
-
-  const previewPillLabel = `+${formatCentsShort(previewCents)}`;
-  const previewPillWidth = Math.max(88, previewPillLabel.length * 8.4 + 22);
 
   return (
     <g>
-      {receiving && (
-        <rect
-          className="box-glow"
-          x={x}
-          y={y}
-          width={width}
-          height={height}
-          rx={14}
-          fill="var(--box-stroke)"
-          style={delayStyle}
-        />
-      )}
-
       <rect
         x={x}
         y={y}
@@ -293,8 +302,6 @@ function SleeveBox({
         fill="transparent"
         stroke="var(--box-stroke)"
         strokeWidth={1.5}
-        className={receiving ? 'box-receiving' : undefined}
-        style={receiving ? delayStyle : undefined}
       />
 
       {exhausted && (
@@ -310,75 +317,159 @@ function SleeveBox({
         />
       )}
 
-      <text x={box.centerX} y={y + 30} textAnchor="middle" fontSize={16.5} fontWeight={600} fill="var(--ink)">
-        {sleeve.tickers}
-      </text>
-      <text x={box.centerX} y={y + 51} textAnchor="middle" fontSize={13.5} fill="var(--ink)">
+      {/* Box header: sleeve label and its share of the whole portfolio. Per-asset detail lives in the rows below. */}
+      <text x={box.centerX} y={y + 32} textAnchor="middle" fontSize={17} fontWeight={650} fill="var(--ink-strong)">
         {sleeve.label}
       </text>
-      <text x={box.centerX} y={y + 84} textAnchor="middle" fontSize={25} fontWeight={700} fill="var(--ink-strong)">
-        {formatBps(sleeve.targetBps)}
+      <text x={box.centerX} y={y + 54} textAnchor="middle" fontSize={13} fill="var(--ink)">
+        {formatBps(sleeve.targetBps)} of portfolio
       </text>
 
       <line
         x1={x + 18}
-        y1={y + 99}
+        y1={y + 74}
         x2={x + width - 18}
-        y2={y + 99}
+        y2={y + 74}
         stroke="var(--panel-stroke)"
         strokeWidth={1}
       />
 
-      <text x={x + 18} y={y + 121} fontSize={13} fontWeight={600} fill="var(--ink-strong)">
-        {formatCentsShort(sleeve.holdingCents)}
-      </text>
-      <text x={x + width - 18} y={y + 121} textAnchor="end" fontSize={12} fill="var(--diagram-meta)">
-        {sleeve.holdingCents > 0 ? `${formatBps(sleeve.actualBps)} · ${formatDriftBps(sleeve.driftBps)}` : 'empty'}
+      {box.rows.length === 0 && (
+        <text x={box.centerX} y={y + height - 10} textAnchor="middle" fontSize={12.5} fill="var(--diagram-note)">
+          No assets yet
+        </text>
+      )}
+
+      {box.rows.map((row, index) => (
+        <AssetRow
+          key={row.asset.id}
+          row={row}
+          isFirst={index === 0}
+          previewCents={previewByAsset.get(row.asset.id)?.amountCents ?? 0}
+          previewBlockedCents={previewByAsset.get(row.asset.id)?.blockedCents ?? 0}
+          receiving={flightDelay.has(row.asset.id)}
+          delay={flightDelay.get(row.asset.id) ?? 0}
+        />
+      ))}
+    </g>
+  );
+}
+
+function AssetRow({
+  row,
+  isFirst,
+  previewCents,
+  previewBlockedCents,
+  receiving,
+  delay,
+}: {
+  row: AssetRowGeometry;
+  isFirst: boolean;
+  previewCents: number;
+  previewBlockedCents: number;
+  receiving: boolean;
+  delay: number;
+}) {
+  const { asset, x, y, width, height } = row;
+  const delayStyle = { '--delay': `${delay}s` } as React.CSSProperties;
+
+  // Rows have no built-in horizontal inset (row.x/row.width span the box's full
+  // inner width), so content is inset here, mirroring the box's own 18px inset.
+  const insetX = x + 18;
+  const endX = x + width - 18;
+
+  // Drift bar: the track is the target weight, the fill is the actual weight,
+  // computed from THIS asset's own actual/effective-target (not the sleeve's).
+  const barWidth = width - 36;
+  const driftRatio = asset.effectiveTargetBps > 0
+    ? Math.min(2, asset.actualBps / asset.effectiveTargetBps)
+    : 0;
+
+  return (
+    <g>
+      {/* Divider between rows within the same box; the box header already has its own line above the first row. */}
+      {!isFirst && (
+        <line x1={insetX} y1={y} x2={endX} y2={y} stroke="var(--panel-stroke)" strokeWidth={1} />
+      )}
+
+      {receiving && (
+        <rect
+          className="box-glow"
+          x={x + 2}
+          y={y + 3}
+          width={width - 4}
+          height={height - 6}
+          rx={10}
+          fill="var(--box-stroke)"
+          style={delayStyle}
+        />
+      )}
+      {receiving && (
+        <rect
+          x={x + 2}
+          y={y + 3}
+          width={width - 4}
+          height={height - 6}
+          rx={10}
+          fill="transparent"
+          stroke="var(--box-stroke)"
+          strokeWidth={1.2}
+          className="box-receiving"
+          style={delayStyle}
+        />
+      )}
+
+      <text x={insetX} y={y + 20} fontSize={14.5} fontWeight={600} fill="var(--ink-strong)">
+        {asset.ticker}
       </text>
 
-      <rect x={x + 18} y={y + 130} width={barWidth} height={6} rx={3} fill="var(--diagram-track)" />
+      {/* While a deposit is being previewed for this asset, its incoming amount
+          replaces the static "share of sleeve" readout so the two never fight for space. */}
+      {previewCents > 0 ? (
+        <g className="preview-amount">
+          <text x={endX} y={y + 20} textAnchor="end" fontSize={13} fontWeight={650} fill="var(--box-stroke)">
+            {`+${formatCentsShort(previewCents)}`}
+          </text>
+        </g>
+      ) : (
+        <text x={endX} y={y + 20} textAnchor="end" fontSize={11.5} fill="var(--diagram-meta)">
+          {formatBps(asset.weightBps)} of sleeve
+        </text>
+      )}
+
+      <text x={insetX} y={y + 37} fontSize={12} fontWeight={600} fill="var(--ink)">
+        {formatCentsShort(asset.holdingCents)}
+      </text>
+      <text x={endX} y={y + 37} textAnchor="end" fontSize={11} fill="var(--diagram-meta)">
+        {asset.holdingCents > 0 ? `${formatBps(asset.actualBps)} · ${formatDriftBps(asset.driftBps)}` : 'empty'}
+      </text>
+
+      <rect x={insetX} y={y + 43} width={barWidth} height={5} rx={2.5} fill="var(--diagram-track)" />
       <rect
-        x={x + 18}
-        y={y + 130}
+        x={insetX}
+        y={y + 43}
         width={Math.min(barWidth, (barWidth / 2) * driftRatio)}
-        height={6}
-        rx={3}
+        height={5}
+        rx={2.5}
         fill="var(--box-stroke)"
       />
       {/* Tick at the halfway point of the track, which is where "on target" sits. */}
       <line
-        x1={x + 18 + barWidth / 2}
-        y1={y + 127}
-        x2={x + 18 + barWidth / 2}
-        y2={y + 139}
+        x1={insetX + barWidth / 2}
+        y1={y + 41}
+        x2={insetX + barWidth / 2}
+        y2={y + 50}
         stroke="var(--ink-strong)"
-        strokeWidth={1.5}
+        strokeWidth={1.3}
       />
-
-      {/* Incoming amount, straddling the top edge of the box. */}
-      {previewCents > 0 && (
-        <g className="preview-amount">
-          <rect
-            x={box.centerX - previewPillWidth / 2}
-            y={y - 14}
-            width={previewPillWidth}
-            height={28}
-            rx={14}
-            fill="var(--box-stroke)"
-          />
-          <text x={box.centerX} y={y + 5} textAnchor="middle" fontSize={14} fontWeight={650} fill="#ffffff">
-            {previewPillLabel}
-          </text>
-        </g>
-      )}
 
       {previewBlockedCents > 0 && (
         <g className="preview-amount">
           <text
-            x={box.centerX}
-            y={y + height - 8}
+            x={row.centerX}
+            y={y + height - 3}
             textAnchor="middle"
-            fontSize={12}
+            fontSize={10}
             fontWeight={600}
             fill="var(--destructive)"
           >

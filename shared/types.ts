@@ -10,31 +10,58 @@ export interface Account {
   roomUsedCents: number;
   /** `roomLimitCents - roomUsedCents`, floored at 0. `null` when unlimited. */
   roomRemainingCents: number | null;
+  /** Sum of this account's descendant asset holdings. */
+  holdingCents: number;
+  sortOrder: number;
+}
+
+export interface Asset {
+  id: string;
+  sleeveId: string;
+  ticker: string;
+  label: string;
+  /** Target share of the parent sleeve, in basis points. A sleeve's assets sum to 10000. */
+  weightBps: number;
+  holdingCents: number;
+  /** Display-only: floor(sleeve.targetBps * weightBps / 10000). */
+  effectiveTargetBps: number;
+  /** Actual share of the whole portfolio, in basis points. 0 when the portfolio is empty. */
+  actualBps: number;
+  /** `actualBps - effectiveTargetBps`. Negative means underweight. */
+  driftBps: number;
   sortOrder: number;
 }
 
 export interface Sleeve {
   id: string;
   accountId: string;
-  tickers: string;
   label: string;
   /** Target share of the total portfolio, in basis points. All sleeves sum to 10000. */
   targetBps: number;
-  holdingCents: number;
-  /** Actual share of the current portfolio, in basis points. 0 when the portfolio is empty. */
-  actualBps: number;
-  /** `actualBps - targetBps`. Negative means underweight, so deposits flow here first. */
-  driftBps: number;
   sortOrder: number;
+  /** Ordered by sortOrder. */
+  assets: Asset[];
+  /** Sum of this sleeve's asset holdings. */
+  holdingCents: number;
+  /** Actual share of the whole portfolio, in basis points. */
+  actualBps: number;
+  /** `actualBps - targetBps`. */
+  driftBps: number;
+  /** Sum of assets[].weightBps. Should be 10000 once fully allocated. */
+  assetWeightTotalBps: number;
 }
 
 export interface PortfolioState {
   accounts: Account[];
+  /** Flat, with nested assets; ordered by sortOrder. */
   sleeves: Sleeve[];
   totalCents: number;
 }
 
 export interface AllocationLine {
+  /** The unit of allocation. */
+  assetId: string;
+  /** Derived, for display grouping. */
   sleeveId: string;
   accountId: string;
   /** What the rebalancer wanted to put here, before contribution-room capping. */
@@ -61,5 +88,5 @@ export interface InvestmentRecord {
   allocatedCents: number;
   unallocatedCents: number;
   createdAt: string;
-  lines: { sleeveId: string; intendedCents: number; amountCents: number }[];
+  lines: { assetId: string; sleeveId: string; intendedCents: number; amountCents: number }[];
 }

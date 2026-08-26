@@ -9,9 +9,24 @@ deposit accounts for what you already hold.
 
 ![Demo: entering a deposit, previewing the split across sleeves, and watching it land.](docs/media/demo.gif)
 
+## Structure
+
+Each account (RRSP, TFSA, non-registered — or any labels you choose) holds one or
+more sleeves, and each sleeve holds one or more assets, each with its own ticker,
+holding, and target share of the sleeve. The full three-level hierarchy — **Account
+→ Sleeve → Asset** — is editable: add, rename, reorder, and delete at any level from
+the **Edit** view, reachable via the Plan/Edit toggle at the top of the page. The
+**Plan** view is where you type a deposit and watch it land.
+
+A fresh database starts with an empty portfolio; that empty state offers a **Load
+example portfolio** button (also `POST /api/presets/example`) that loads the
+account/sleeve/asset tree described below.
+
 ## The allocation
 
-Weights are percentages of the **total** portfolio and sum to 100.
+This is the shape of the built-in example portfolio — your own accounts, sleeves,
+and assets can look however you like. Weights are percentages of the **total**
+portfolio and sum to 100.
 
 | Sleeve                | Tickers     | Target | Account         |
 | --------------------- | ----------- | -----: | --------------- |
@@ -24,14 +39,14 @@ Weights are percentages of the **total** portfolio and sum to 100.
 ## How deposits are split
 
 **Drift-aware cash-flow rebalancing.** A deposit does not get carved up by the
-fixed target weights. It flows to whichever sleeves sit furthest *below* their
+fixed target weights. It flows to whichever assets sit furthest *below* their
 target, pulling the portfolio back toward the targets without ever selling
 anything.
 
-For each sleeve the engine computes how far below target it would sit once the
-deposit lands, clamps that at zero so overweight sleeves get nothing, and splits
+For each asset the engine computes how far below target it would sit once the
+deposit lands, clamps that at zero so overweight assets get nothing, and splits
 the deposit in proportion to those shortfalls. When nothing is overweight the
-shortfalls sum to exactly the deposit, so every sleeve lands precisely on target.
+shortfalls sum to exactly the deposit, so every asset lands precisely on target.
 
 **Contribution room caps, and does not redirect.** If a deposit would push the
 RRSP or TFSA past its remaining room, that account's lines are scaled down to
@@ -48,7 +63,7 @@ Requires Node 20+, pnpm, and PostgreSQL running locally.
 ```bash
 pnpm install
 
-# One-time: create the database, then load schema + seed.
+# One-time: create the database, then load the schema.
 createdb invest_buddy
 pnpm db:reset
 
@@ -59,9 +74,16 @@ Point at a different database with `DATABASE_URL`.
 
 ### First run
 
-Open **Settings** and set your real RRSP and TFSA contribution room from your CRA
-Notice of Assessment, plus any balances you already hold. **The room figures that
-ship in the seed are placeholders, not real CRA limits.**
+`pnpm db:reset` only loads `schema.sql`, so the app starts with an empty portfolio.
+From there, either build your accounts, sleeves, and assets by hand in the **Edit**
+view, or click **Load example portfolio** on the empty-state screen to load the
+RRSP/TFSA/non-registered tree described above.
+
+Whichever way you start, set your real contribution room and any balances you
+already hold from the **Edit** view: the edit icon on an account opens its account
+dialog, which is where the contribution-room field lives now (the old Settings
+dialog is gone). **If you loaded the example portfolio, its room figures are
+placeholders, not real CRA limits.**
 
 ## Connecting to the database with psql
 
@@ -102,28 +124,32 @@ brew services list         # shows whether postgresql@18 is started
 Every money column is stored as **integer cents**, and `target_bps` is in basis
 points (10000 = 100%). Divide when reading them by hand.
 
-Current holdings against their targets:
+Current holdings against their targets (holdings live on `assets` now, not `sleeves`):
 
 ```sql
-SELECT s.tickers,
-       (s.target_bps / 100.0)::numeric(5,2)     AS target_pct,
-       (s.holding_cents / 100.0)::numeric(14,2) AS holding
-  FROM sleeves s
- ORDER BY s.sort_order;
+SELECT a.ticker,
+       (s.target_bps / 100.0)::numeric(5,2)     AS sleeve_target_pct,
+       (a.holding_cents / 100.0)::numeric(14,2) AS holding
+  FROM assets a
+  JOIN sleeves s ON s.id = a.sleeve_id
+ ORDER BY s.sort_order, a.sort_order;
 ```
 
 Contribution room, with usage derived from the ledger the same way the API derives
-it (`room_limit` is NULL for non-registered, meaning no limit):
+it (`room_limit` is NULL for non-registered, meaning no limit). `investment_lines`
+now references `assets` directly, so joining back to an account goes through both
+`assets` and `sleeves`:
 
 ```sql
-SELECT a.label,
-       (a.room_limit / 100.0)::numeric(14,2)                     AS room_limit,
+SELECT acc.label,
+       (acc.room_limit / 100.0)::numeric(14,2)                   AS room_limit,
        (COALESCE(SUM(l.amount_cents), 0) / 100.0)::numeric(14,2) AS used
-  FROM accounts a
-  LEFT JOIN sleeves s ON s.account_id = a.id
-  LEFT JOIN investment_lines l ON l.sleeve_id = s.id
- GROUP BY a.label, a.room_limit, a.sort_order
- ORDER BY a.sort_order;
+  FROM accounts acc
+  LEFT JOIN sleeves s ON s.account_id = acc.id
+  LEFT JOIN assets a ON a.sleeve_id = s.id
+  LEFT JOIN investment_lines l ON l.asset_id = a.id
+ GROUP BY acc.label, acc.room_limit, acc.sort_order
+ ORDER BY acc.sort_order;
 ```
 
 Investment history, newest first:
@@ -137,13 +163,16 @@ SELECT i.id,
  ORDER BY i.id DESC;
 ```
 
-Schema reference: `\dt` lists the four tables, `\d sleeves` describes one.
+Schema reference: `\dt` lists the five tables (`accounts`, `sleeves`, `assets`,
+`investments`, `investment_lines`), `\d assets` describes one.
 
 ### Resetting
 
-`pnpm db:reset` drops every table and reloads schema plus seed. **It destroys all
-recorded investments and holdings.** It also shells out to `psql`, so it needs the
-PATH fix above.
+`pnpm db:reset` drops every table and reloads `schema.sql`. **It destroys all
+recorded investments and holdings**, and leaves the portfolio empty — there is no
+seed data anymore. Use the app's "Load example portfolio" button (or
+`POST /api/presets/example`) afterwards if you want the example data back. It also
+shells out to `psql`, so it needs the PATH fix above.
 
 
 ## Scripts
@@ -156,7 +185,7 @@ PATH fix above.
 | `pnpm lint`      | oxlint; any warning fails the run                |
 | `pnpm typecheck` | Typecheck client and server                      |
 | `pnpm build`     | Production build                                 |
-| `pnpm db:reset`  | Drop, recreate and reseed all tables             |
+| `pnpm db:reset`  | Drop and recreate all tables from `schema.sql` (portfolio starts empty) |
 
 ## Tests
 
@@ -164,16 +193,17 @@ PATH fix above.
 pnpm test
 ```
 
-Around 77 tests covering the rebalancing engine, money parsing and formatting,
+Around 150 tests covering the rebalancing engine, money parsing and formatting,
 diagram geometry, the portfolio reader and every API endpoint. No React rendering
 tests — the logic those components rely on is covered directly.
 
 **The server tests need a running local PostgreSQL.** They do not touch your
 `invest_buddy` database: `server/test/db.ts` creates a throwaway database per test
-file, seeded from the same `schema.sql` and `seed.sql` the app ships, and drops it
-afterwards. It connects through `pg` rather than shelling out to `createdb`, so it
-does not need `psql` on your PATH. Set `DATABASE_URL` to point the tests at a
-different server.
+file from the same `schema.sql` the app ships, loads the example account/sleeve/
+asset tree (`server/presets/example.ts`) into it where a test needs starting data,
+and drops the database afterwards. It connects through `pg` rather than shelling
+out to `createdb`, so it does not need `psql` on your PATH. Set `DATABASE_URL` to
+point the tests at a different server.
 
 The API tests run against `createApp(pool)` via supertest without binding a port,
 which is why `server/index.ts` is only an entrypoint and all the routes live in
@@ -207,9 +237,12 @@ shared/         rebalance.ts — the engine, plus its tests. Pure, no I/O.
 server/         app.ts       — createApp(pool): every route, pool injected.
                 index.ts     — entrypoint: builds a pool and listens.
                 portfolio.ts — reads portfolio state out of Postgres.
-                db/          — schema.sql, seed.sql, connection pool.
-                test/db.ts   — throwaway seeded database for tests.
-src/            App.tsx      — page shell, amount input, invest flow.
+                presets/example.ts — the opt-in example account/sleeve/asset tree.
+                db/          — schema.sql, connection pool.
+                test/db.ts   — throwaway database for tests.
+src/            App.tsx      — page shell, amount input, invest flow, Plan/Edit toggle.
+                components/EmptyState.tsx — first-run screen when the portfolio is empty.
+                components/editor/  — the Edit view: account/sleeve/asset CRUD.
                 components/diagram/ — the SVG allocation diagram.
                 lib/         — API client and money formatting.
 ```

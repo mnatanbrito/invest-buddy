@@ -1,7 +1,7 @@
 import type { PoolClient } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { readPortfolio } from './portfolio';
-import { createTestDatabase, type TestDatabase } from './test/db';
+import { deleteBlockers, readPortfolio } from './portfolio';
+import { createTestDatabase, loadExample, type TestDatabase } from './test/db';
 
 let db: TestDatabase;
 
@@ -15,6 +15,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await db.reset();
+  await loadExample(db.pool);
 });
 
 /** Runs a read against a checked-out client, mirroring how the routes call it. */
@@ -35,15 +36,15 @@ async function recordInvestment(lines: Record<string, number>) {
      VALUES ($1, $1, 0) RETURNING id`,
     [total],
   );
-  for (const [sleeveId, cents] of Object.entries(lines)) {
+  for (const [assetId, cents] of Object.entries(lines)) {
     await db.pool.query(
-      `INSERT INTO investment_lines (investment_id, sleeve_id, intended_cents, amount_cents)
+      `INSERT INTO investment_lines (investment_id, asset_id, intended_cents, amount_cents)
        VALUES ($1, $2, $3, $3)`,
-      [rows[0].id, sleeveId, cents],
+      [rows[0].id, assetId, cents],
     );
-    await db.pool.query('UPDATE sleeves SET holding_cents = holding_cents + $1 WHERE id = $2', [
+    await db.pool.query('UPDATE assets SET holding_cents = holding_cents + $1 WHERE id = $2', [
       cents,
-      sleeveId,
+      assetId,
     ]);
   }
   return rows[0].id;
@@ -59,7 +60,7 @@ describe('readPortfolio money types', () => {
       expect(typeof account.roomUsedCents, `${account.id} with no investments`).toBe('number');
     }
 
-    await recordInvestment({ us_equity: 450_000, cad_equity: 200_000 });
+    await recordInvestment({ us_equity_vti: 450_000, cad_equity_vcn: 200_000 });
 
     const populated = await read();
     for (const account of populated.accounts) {
@@ -68,8 +69,8 @@ describe('readPortfolio money types', () => {
     expect(populated.accounts.find((a) => a.id === 'rrsp')!.roomUsedCents).toBe(450_000);
   });
 
-  it('returns every money and weight field as a number', async () => {
-    await recordInvestment({ us_equity: 450_000 });
+  it('returns every money and weight field as a number, at both levels', async () => {
+    await recordInvestment({ us_equity_vti: 450_000 });
     const portfolio = await read();
 
     expect(typeof portfolio.totalCents).toBe('number');
@@ -78,6 +79,15 @@ describe('readPortfolio money types', () => {
       expect(typeof sleeve.targetBps).toBe('number');
       expect(typeof sleeve.actualBps).toBe('number');
       expect(typeof sleeve.driftBps).toBe('number');
+      for (const asset of sleeve.assets) {
+        expect(typeof asset.holdingCents).toBe('number');
+        expect(typeof asset.weightBps).toBe('number');
+        expect(typeof asset.actualBps).toBe('number');
+        expect(typeof asset.driftBps).toBe('number');
+      }
+    }
+    for (const account of portfolio.accounts) {
+      expect(typeof account.holdingCents).toBe('number');
     }
   });
 });
@@ -91,7 +101,7 @@ describe('readPortfolio contribution room', () => {
   });
 
   it('derives room used from the ledger, so deleting an investment returns it', async () => {
-    const investmentId = await recordInvestment({ us_equity: 1_000_000 });
+    const investmentId = await recordInvestment({ us_equity_vti: 1_000_000 });
     expect((await read()).accounts.find((a) => a.id === 'rrsp')!.roomUsedCents).toBe(1_000_000);
 
     await db.pool.query('DELETE FROM investments WHERE id = $1', [investmentId]);
@@ -99,7 +109,7 @@ describe('readPortfolio contribution room', () => {
   });
 
   it('floors remaining room at zero when the limit is lowered below what is used', async () => {
-    await recordInvestment({ us_equity: 4_000_000 });
+    await recordInvestment({ us_equity_vti: 4_000_000 });
     await db.pool.query("UPDATE accounts SET room_limit = 1_000_00 WHERE id = 'rrsp'");
 
     const rrsp = (await read()).accounts.find((a) => a.id === 'rrsp')!;
@@ -108,7 +118,7 @@ describe('readPortfolio contribution room', () => {
   });
 
   it('sums room across every sleeve in an account', async () => {
-    await recordInvestment({ us_equity: 450_000, cad_bonds: 100_000 });
+    await recordInvestment({ us_equity_vti: 450_000, cad_bonds_vab: 100_000 });
     expect((await read()).accounts.find((a) => a.id === 'rrsp')!.roomUsedCents).toBe(550_000);
   });
 });
@@ -120,17 +130,21 @@ describe('readPortfolio weights', () => {
     for (const sleeve of portfolio.sleeves) {
       expect(sleeve.actualBps).toBe(0);
       expect(sleeve.driftBps).toBe(0);
+      for (const asset of sleeve.assets) {
+        expect(asset.actualBps).toBe(0);
+        expect(asset.driftBps).toBe(0);
+      }
     }
   });
 
   it('computes drift against the target once money is present', async () => {
     // On target: 45/10/20/15/10 of $10,000.
     await recordInvestment({
-      us_equity: 450_000,
-      cad_bonds: 100_000,
-      cad_equity: 200_000,
-      intl_equity: 150_000,
-      em_equity: 100_000,
+      us_equity_vti: 450_000,
+      cad_bonds_vab: 100_000,
+      cad_equity_vcn: 200_000,
+      intl_equity_xef: 150_000,
+      em_equity_vee: 100_000,
     });
 
     for (const sleeve of (await read()).sleeves) {
@@ -140,14 +154,14 @@ describe('readPortfolio weights', () => {
   });
 
   it('signs drift so underweight is negative and overweight positive', async () => {
-    await recordInvestment({ us_equity: 900_000, cad_equity: 100_000 });
+    await recordInvestment({ us_equity_vti: 900_000, cad_equity_vcn: 100_000 });
     const sleeves = (await read()).sleeves;
 
     expect(sleeves.find((s) => s.id === 'us_equity')!.driftBps).toBeGreaterThan(0);
     expect(sleeves.find((s) => s.id === 'cad_equity')!.driftBps).toBeLessThan(0);
   });
 
-  it('orders accounts and sleeves by their sort order', async () => {
+  it('orders accounts, sleeves and assets by their sort order', async () => {
     const portfolio = await read();
     expect(portfolio.accounts.map((a) => a.id)).toEqual(['rrsp', 'tfsa', 'non_registered']);
     expect(portfolio.sleeves.map((s) => s.id)).toEqual([
@@ -157,5 +171,72 @@ describe('readPortfolio weights', () => {
       'intl_equity',
       'em_equity',
     ]);
+    expect(portfolio.sleeves.find((s) => s.id === 'us_equity')!.assets.map((a) => a.id)).toEqual([
+      'us_equity_vti',
+    ]);
+  });
+
+  it('rolls asset holdings up into sleeve and account totals', async () => {
+    await recordInvestment({ us_equity_vti: 450_000, cad_bonds_vab: 100_000 });
+    const portfolio = await read();
+
+    expect(portfolio.sleeves.find((s) => s.id === 'us_equity')!.holdingCents).toBe(450_000);
+    expect(portfolio.accounts.find((a) => a.id === 'rrsp')!.holdingCents).toBe(550_000);
   });
 });
+
+describe('deleteBlockers', () => {
+  it('reports nothing blocking a fresh asset, sleeve or account', async () => {
+    expect(await withClient((c) => deleteBlockers(c, 'asset', 'us_equity_vti'))).toEqual({
+      holdingCents: 0,
+      hasHistory: false,
+    });
+    expect(await withClient((c) => deleteBlockers(c, 'sleeve', 'us_equity'))).toEqual({
+      holdingCents: 0,
+      hasHistory: false,
+    });
+    expect(await withClient((c) => deleteBlockers(c, 'account', 'rrsp'))).toEqual({
+      holdingCents: 0,
+      hasHistory: false,
+    });
+  });
+
+  it('reports current holdings as a blocker, scoped to descendants', async () => {
+    await recordInvestment({ us_equity_vti: 450_000 });
+    expect(await withClient((c) => deleteBlockers(c, 'asset', 'us_equity_vti'))).toMatchObject({
+      holdingCents: 450_000,
+      hasHistory: true,
+    });
+    expect(await withClient((c) => deleteBlockers(c, 'sleeve', 'cad_bonds'))).toEqual({
+      holdingCents: 0,
+      hasHistory: false,
+    });
+  });
+
+  it('keeps hasHistory true after the asset is zeroed out', async () => {
+    await recordInvestment({ us_equity_vti: 450_000 });
+    await db.pool.query("UPDATE assets SET holding_cents = 0 WHERE id = 'us_equity_vti'");
+
+    expect(await withClient((c) => deleteBlockers(c, 'asset', 'us_equity_vti'))).toEqual({
+      holdingCents: 0,
+      hasHistory: true,
+    });
+  });
+
+  it('scopes account-level blockers to every descendant asset', async () => {
+    await recordInvestment({ cad_bonds_vab: 100_000 });
+    expect(await withClient((c) => deleteBlockers(c, 'account', 'rrsp'))).toMatchObject({
+      holdingCents: 100_000,
+      hasHistory: true,
+    });
+  });
+});
+
+async function withClient<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
+  const client = await db.pool.connect();
+  try {
+    return await fn(client);
+  } finally {
+    client.release();
+  }
+}

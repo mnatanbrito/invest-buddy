@@ -2,10 +2,16 @@ import type { AllocationLine, AllocationPlan } from './types';
 
 const BPS = 10_000n;
 
-export interface RebalanceSleeve {
+/** Scale of `RebalanceUnit.targetWeight`: sleeve.targetBps * asset.weightBps. */
+export const WEIGHT_SCALE = BPS * BPS; // 100_000_000
+
+export interface RebalanceUnit {
+  /** assetId */
   id: string;
+  sleeveId: string;
   accountId: string;
-  targetBps: number;
+  /** sleeve.targetBps * asset.weightBps, in [0, WEIGHT_SCALE]. */
+  targetWeight: number;
   holdingCents: number;
 }
 
@@ -45,18 +51,19 @@ export function apportion(weights: bigint[], total: bigint): bigint[] {
  * Drift-aware cash-flow rebalancing: work out where a deposit should go so the
  * portfolio moves back toward its target weights, without ever selling.
  *
- * For each sleeve, "need" is how far below its target it would sit once the
- * deposit lands: `targetBps * totalAfter - holding * 10000`, clamped at zero so
- * overweight sleeves get nothing. Those needs become the apportionment weights.
+ * For each unit, "need" is how far below its target it would sit once the
+ * deposit lands: `targetWeight * totalAfter - holding * WEIGHT_SCALE`, clamped
+ * at zero so overweight units get nothing. Those needs become the apportionment
+ * weights.
  *
- * The two cases fall out of the same formula. When no sleeve is overweight the
- * needs sum to exactly `10000 * deposit`, so each sleeve receives precisely what
- * it needs and the portfolio lands on target. When some sleeve is overweight the
- * needs sum to more than the deposit can cover, so every underweight sleeve gets
- * a proportional share of the shortfall instead.
+ * The two cases fall out of the same formula. When no unit is overweight the
+ * needs sum to exactly `WEIGHT_SCALE * deposit`, so each unit receives precisely
+ * what it needs and the portfolio lands on target. When some unit is overweight
+ * the needs sum to more than the deposit can cover, so every underweight unit
+ * gets a proportional share of the shortfall instead.
  */
 export function planDeposit(
-  sleeves: RebalanceSleeve[],
+  units: RebalanceUnit[],
   accounts: RebalanceAccount[],
   depositCents: number,
 ): AllocationPlan {
@@ -65,11 +72,11 @@ export function planDeposit(
   }
 
   const deposit = BigInt(depositCents);
-  const totalHoldings = sleeves.reduce((sum, s) => sum + BigInt(s.holdingCents), 0n);
+  const totalHoldings = units.reduce((sum, u) => sum + BigInt(u.holdingCents), 0n);
   const totalAfter = totalHoldings + deposit;
 
-  const needs = sleeves.map((s) => {
-    const shortfall = BigInt(s.targetBps) * totalAfter - BigInt(s.holdingCents) * BPS;
+  const needs = units.map((u) => {
+    const shortfall = BigInt(u.targetWeight) * totalAfter - BigInt(u.holdingCents) * WEIGHT_SCALE;
     return shortfall > 0n ? shortfall : 0n;
   });
 
@@ -84,7 +91,7 @@ export function planDeposit(
     if (account.roomRemainingCents === null) continue;
 
     const room = BigInt(Math.max(0, account.roomRemainingCents));
-    const indices = sleeves.flatMap((s, i) => (s.accountId === account.id ? [i] : []));
+    const indices = units.flatMap((u, i) => (u.accountId === account.id ? [i] : []));
     const wanted = indices.reduce((sum, i) => sum + intended[i], 0n);
     if (wanted <= room) continue;
 
@@ -98,9 +105,10 @@ export function planDeposit(
     cappedAccountIds.push(account.id);
   }
 
-  const lines: AllocationLine[] = sleeves.map((s, i) => ({
-    sleeveId: s.id,
-    accountId: s.accountId,
+  const lines: AllocationLine[] = units.map((u, i) => ({
+    assetId: u.id,
+    sleeveId: u.sleeveId,
+    accountId: u.accountId,
     intendedCents: Number(intended[i]),
     amountCents: Number(amounts[i]),
     blockedCents: Number(intended[i] - amounts[i]),
@@ -121,4 +129,14 @@ export function planDeposit(
 export function actualBps(holdingCents: number, totalCents: number): number {
   if (totalCents <= 0) return 0;
   return Number((BigInt(holdingCents) * BPS) / BigInt(totalCents));
+}
+
+/** sleeve.targetBps * asset.weightBps, on the WEIGHT_SCALE. Exact — no rounding. */
+export function effectiveWeight(sleeveTargetBps: number, assetWeightBps: number): number {
+  return sleeveTargetBps * assetWeightBps;
+}
+
+/** Display-only share of the whole portfolio an asset targets, in basis points. Floored. */
+export function effectiveTargetBps(sleeveTargetBps: number, assetWeightBps: number): number {
+  return Math.floor((sleeveTargetBps * assetWeightBps) / 10_000);
 }

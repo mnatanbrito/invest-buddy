@@ -131,29 +131,79 @@
 /* ---------------------------------------------------------------------------
    Allocation diagram palette
 
-   One hue per account, echoing the source diagram: RRSP blue, TFSA green,
-   non-registered a warm terracotta. Each account's <g> carries a class that
-   binds these to the generic --panel-* / --box-* names the SVG actually draws
-   with, so the shapes stay hue-agnostic.
+   A 10-slot cycling categorical palette, one hue per PANEL INDEX (not per
+   account id — account ids are arbitrary/random once created through the
+   editor, so the diagram keys color by the account's position in the
+   accounts array instead: `.acct-color-0` .. `.acct-color-9`, cycling via
+   `index % 10` past 10 accounts). Each slot's <g> carries a class that binds
+   these to the generic --panel-* / --box-* names the SVG actually draws
+   with, so the shapes stay hue-agnostic. Slots 0-2 reuse the original
+   RRSP-blue / TFSA-green / non-registered-terracotta values for visual
+   continuity with the 3-account preset; slots 3-9 add distinct hues (purple,
+   amber, teal, rose, indigo, olive, fuchsia) spread around the wheel so
+   every slot reads as a genuinely different color, not a lightness variant
+   of another slot.
    --------------------------------------------------------------------------- */
 :root {
-    --rrsp-panel: #eff5ff;
-    --rrsp-edge: #b8d3f8;
-    --rrsp-box-edge: #4a8ee0;
-    --rrsp-ink: #1a5fb4;
-    --rrsp-ink-strong: #10457f;
+    --acct-0-panel: #eff5ff;
+    --acct-0-edge: #b8d3f8;
+    --acct-0-box-edge: #4a8ee0;
+    --acct-0-ink: #1a5fb4;
+    --acct-0-ink-strong: #10457f;
 
-    --tfsa-panel: #ecfaf1;
-    --tfsa-edge: #b3e2c6;
-    --tfsa-box-edge: #3d9e6a;
-    --tfsa-ink: #1c7d4d;
-    --tfsa-ink-strong: #145c38;
+    --acct-1-panel: #ecfaf1;
+    --acct-1-edge: #b3e2c6;
+    --acct-1-box-edge: #3d9e6a;
+    --acct-1-ink: #1c7d4d;
+    --acct-1-ink-strong: #145c38;
 
-    --nonreg-panel: #fdf1ed;
-    --nonreg-edge: #f3cbbb;
-    --nonreg-box-edge: #cf6b45;
-    --nonreg-ink: #a8482a;
-    --nonreg-ink-strong: #83341c;
+    --acct-2-panel: #fdf1ed;
+    --acct-2-edge: #f3cbbb;
+    --acct-2-box-edge: #cf6b45;
+    --acct-2-ink: #a8482a;
+    --acct-2-ink-strong: #83341c;
+
+    --acct-3-panel: #f3eefd;
+    --acct-3-edge: #d8c2f5;
+    --acct-3-box-edge: #8b5cf6;
+    --acct-3-ink: #6d28d9;
+    --acct-3-ink-strong: #4c1d95;
+
+    --acct-4-panel: #fdf6e3;
+    --acct-4-edge: #f0d999;
+    --acct-4-box-edge: #d99a1b;
+    --acct-4-ink: #a1670a;
+    --acct-4-ink-strong: #7a4d05;
+
+    --acct-5-panel: #eafcfb;
+    --acct-5-edge: #a7e6e0;
+    --acct-5-box-edge: #16a394;
+    --acct-5-ink: #0f766e;
+    --acct-5-ink-strong: #0b544e;
+
+    --acct-6-panel: #fef0f5;
+    --acct-6-edge: #f5c1d6;
+    --acct-6-box-edge: #d63d78;
+    --acct-6-ink: #ad2560;
+    --acct-6-ink-strong: #7f1a46;
+
+    --acct-7-panel: #eef0fd;
+    --acct-7-edge: #c1c8f5;
+    --acct-7-box-edge: #4f5fd6;
+    --acct-7-ink: #333fa8;
+    --acct-7-ink-strong: #232b7a;
+
+    --acct-8-panel: #f6fae0;
+    --acct-8-edge: #d9e59e;
+    --acct-8-box-edge: #8ba32c;
+    --acct-8-ink: #647a1c;
+    --acct-8-ink-strong: #495a12;
+
+    --acct-9-panel: #fbeefc;
+    --acct-9-edge: #edbdf0;
+    --acct-9-box-edge: #b83bc4;
+    --acct-9-ink: #8f2499;
+    --acct-9-ink-strong: #671a70;
 
     --diagram-note: #5c6270;
     --diagram-meta: #7b8290;
@@ -161,51 +211,149 @@
 }
 
 .dark {
-    --rrsp-panel: #101c2e;
-    --rrsp-edge: #29456b;
-    --rrsp-box-edge: #4a80c4;
-    --rrsp-ink: #8ab6ee;
-    --rrsp-ink-strong: #b6d3f7;
+    --acct-0-panel: #101c2e;
+    --acct-0-edge: #29456b;
+    --acct-0-box-edge: #4a80c4;
+    --acct-0-ink: #8ab6ee;
+    --acct-0-ink-strong: #b6d3f7;
 
-    --tfsa-panel: #0e2019;
-    --tfsa-edge: #23503a;
-    --tfsa-box-edge: #3f9068;
-    --tfsa-ink: #74c79b;
-    --tfsa-ink-strong: #a6ddc0;
+    --acct-1-panel: #0e2019;
+    --acct-1-edge: #23503a;
+    --acct-1-box-edge: #3f9068;
+    --acct-1-ink: #74c79b;
+    --acct-1-ink-strong: #a6ddc0;
 
-    --nonreg-panel: #251510;
-    --nonreg-edge: #582f21;
-    --nonreg-box-edge: #c16644;
-    --nonreg-ink: #e09271;
-    --nonreg-ink-strong: #f0b79e;
+    --acct-2-panel: #251510;
+    --acct-2-edge: #582f21;
+    --acct-2-box-edge: #c16644;
+    --acct-2-ink: #e09271;
+    --acct-2-ink-strong: #f0b79e;
+
+    --acct-3-panel: #1e1530;
+    --acct-3-edge: #4c3a6b;
+    --acct-3-box-edge: #a78bfa;
+    --acct-3-ink: #c4b5fd;
+    --acct-3-ink-strong: #ddd6fe;
+
+    --acct-4-panel: #2b2008;
+    --acct-4-edge: #5c4713;
+    --acct-4-box-edge: #d9a63a;
+    --acct-4-ink: #f0c766;
+    --acct-4-ink-strong: #f8dea0;
+
+    --acct-5-panel: #0c2321;
+    --acct-5-edge: #1f4b46;
+    --acct-5-box-edge: #2dd4c4;
+    --acct-5-ink: #5eead4;
+    --acct-5-ink-strong: #99f6e4;
+
+    --acct-6-panel: #2b0f1a;
+    --acct-6-edge: #5c2438;
+    --acct-6-box-edge: #e0609a;
+    --acct-6-ink: #f295bc;
+    --acct-6-ink-strong: #f8bdd6;
+
+    --acct-7-panel: #131530;
+    --acct-7-edge: #2c3266;
+    --acct-7-box-edge: #7c88e6;
+    --acct-7-ink: #a6afef;
+    --acct-7-ink-strong: #c7ccf5;
+
+    --acct-8-panel: #1e2408;
+    --acct-8-edge: #3f4c13;
+    --acct-8-box-edge: #a3c13e;
+    --acct-8-ink: #c4dc7a;
+    --acct-8-ink-strong: #dcecac;
+
+    --acct-9-panel: #24102a;
+    --acct-9-edge: #4d2358;
+    --acct-9-box-edge: #cc5cd6;
+    --acct-9-ink: #e293e8;
+    --acct-9-ink-strong: #edbaf0;
 
     --diagram-note: #9aa2b1;
     --diagram-meta: #7d8593;
     --diagram-track: #2b3140;
 }
 
-.acct-rrsp {
-    --panel-fill: var(--rrsp-panel);
-    --panel-stroke: var(--rrsp-edge);
-    --box-stroke: var(--rrsp-box-edge);
-    --ink: var(--rrsp-ink);
-    --ink-strong: var(--rrsp-ink-strong);
+.acct-color-0 {
+    --panel-fill: var(--acct-0-panel);
+    --panel-stroke: var(--acct-0-edge);
+    --box-stroke: var(--acct-0-box-edge);
+    --ink: var(--acct-0-ink);
+    --ink-strong: var(--acct-0-ink-strong);
 }
 
-.acct-tfsa {
-    --panel-fill: var(--tfsa-panel);
-    --panel-stroke: var(--tfsa-edge);
-    --box-stroke: var(--tfsa-box-edge);
-    --ink: var(--tfsa-ink);
-    --ink-strong: var(--tfsa-ink-strong);
+.acct-color-1 {
+    --panel-fill: var(--acct-1-panel);
+    --panel-stroke: var(--acct-1-edge);
+    --box-stroke: var(--acct-1-box-edge);
+    --ink: var(--acct-1-ink);
+    --ink-strong: var(--acct-1-ink-strong);
 }
 
-.acct-non_registered {
-    --panel-fill: var(--nonreg-panel);
-    --panel-stroke: var(--nonreg-edge);
-    --box-stroke: var(--nonreg-box-edge);
-    --ink: var(--nonreg-ink);
-    --ink-strong: var(--nonreg-ink-strong);
+.acct-color-2 {
+    --panel-fill: var(--acct-2-panel);
+    --panel-stroke: var(--acct-2-edge);
+    --box-stroke: var(--acct-2-box-edge);
+    --ink: var(--acct-2-ink);
+    --ink-strong: var(--acct-2-ink-strong);
+}
+
+.acct-color-3 {
+    --panel-fill: var(--acct-3-panel);
+    --panel-stroke: var(--acct-3-edge);
+    --box-stroke: var(--acct-3-box-edge);
+    --ink: var(--acct-3-ink);
+    --ink-strong: var(--acct-3-ink-strong);
+}
+
+.acct-color-4 {
+    --panel-fill: var(--acct-4-panel);
+    --panel-stroke: var(--acct-4-edge);
+    --box-stroke: var(--acct-4-box-edge);
+    --ink: var(--acct-4-ink);
+    --ink-strong: var(--acct-4-ink-strong);
+}
+
+.acct-color-5 {
+    --panel-fill: var(--acct-5-panel);
+    --panel-stroke: var(--acct-5-edge);
+    --box-stroke: var(--acct-5-box-edge);
+    --ink: var(--acct-5-ink);
+    --ink-strong: var(--acct-5-ink-strong);
+}
+
+.acct-color-6 {
+    --panel-fill: var(--acct-6-panel);
+    --panel-stroke: var(--acct-6-edge);
+    --box-stroke: var(--acct-6-box-edge);
+    --ink: var(--acct-6-ink);
+    --ink-strong: var(--acct-6-ink-strong);
+}
+
+.acct-color-7 {
+    --panel-fill: var(--acct-7-panel);
+    --panel-stroke: var(--acct-7-edge);
+    --box-stroke: var(--acct-7-box-edge);
+    --ink: var(--acct-7-ink);
+    --ink-strong: var(--acct-7-ink-strong);
+}
+
+.acct-color-8 {
+    --panel-fill: var(--acct-8-panel);
+    --panel-stroke: var(--acct-8-edge);
+    --box-stroke: var(--acct-8-box-edge);
+    --ink: var(--acct-8-ink);
+    --ink-strong: var(--acct-8-ink-strong);
+}
+
+.acct-color-9 {
+    --panel-fill: var(--acct-9-panel);
+    --panel-stroke: var(--acct-9-edge);
+    --box-stroke: var(--acct-9-box-edge);
+    --ink: var(--acct-9-ink);
+    --ink-strong: var(--acct-9-ink-strong);
 }
 
 /* ---------------------------------------------------------------------------
