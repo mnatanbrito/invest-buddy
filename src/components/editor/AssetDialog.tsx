@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import type { Asset, PortfolioState } from '@shared/types';
 import { api } from '@/lib/api';
 import { bpsFromPercentField, percentFieldFromBps } from '@/lib/editor';
+import { parseAmountToCents } from '@/lib/money';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -38,6 +39,22 @@ function parseWeightBps(raw: string): number {
   return parsed.bps;
 }
 
+/** Turns a cent amount into an editable field value, without currency symbols. */
+const toField = (cents: number) => (cents / 100).toFixed(2);
+
+/**
+ * A blank or zero field means "holds nothing", which is a legitimate value for
+ * an asset. Anything else that fails to parse is a genuine typo.
+ */
+function parseHoldingToCents(raw: string): number {
+  const parsed = parseAmountToCents(raw);
+  if (parsed.cents !== null) return parsed.cents;
+
+  const normalized = raw.replace(/[$,\s]/g, '').trim();
+  if (normalized === '' || Number(normalized) === 0) return 0;
+  throw new Error(`Current holding: ${parsed.error ?? 'not a valid amount'}`);
+}
+
 export function AssetDialog({ sleeveId, asset, onSaved, trigger }: AssetDialogProps) {
   const [open, setOpen] = useState(false);
 
@@ -66,6 +83,7 @@ function AssetForm({
   const [weightBps, setWeightBps] = useState(
     asset !== undefined ? percentFieldFromBps(asset.weightBps) : '',
   );
+  const [holding, setHolding] = useState(asset ? toField(asset.holdingCents) : '');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -80,8 +98,9 @@ function AssetForm({
         throw new Error('Ticker is required');
       }
       const parsedWeightBps = parseWeightBps(weightBps);
+      const parsedHoldingCents = editing ? parseHoldingToCents(holding) : null;
 
-      const portfolio = editing
+      let portfolio = editing
         ? await api.updateAsset(asset.id, {
             ticker: trimmedTicker,
             label,
@@ -93,6 +112,13 @@ function AssetForm({
             label,
             weightBps: parsedWeightBps,
           });
+
+      // Holdings live behind a separate endpoint, so a changed holding needs a
+      // second call — its response is the authoritative one since it reflects
+      // both writes.
+      if (editing && parsedHoldingCents !== null && parsedHoldingCents !== asset.holdingCents) {
+        portfolio = await api.setHoldings({ [asset.id]: parsedHoldingCents });
+      }
 
       onSaved(portfolio);
       onDone();
@@ -144,6 +170,22 @@ function AssetForm({
             onChange={(event) => setWeightBps(event.target.value)}
           />
         </div>
+
+        {editing && (
+          <div className="space-y-1.5">
+            <Label htmlFor="asset-holding">Current holding</Label>
+            <Input
+              id="asset-holding"
+              inputMode="decimal"
+              className="w-40 text-right tabular-nums"
+              value={holding}
+              onChange={(event) => setHolding(event.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              What you already hold in this asset, if anything.
+            </p>
+          </div>
+        )}
 
         {error && <p className="text-sm text-destructive">{error}</p>}
       </div>

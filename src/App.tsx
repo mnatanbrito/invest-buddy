@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AllocationPlan, InvestmentRecord, PortfolioState } from '@shared/types';
-import { allocationIssues, toRebalanceUnits } from '@shared/allocation';
+import { allocationIssues, isFullyAllocated, toRebalanceUnits } from '@shared/allocation';
 import { planDeposit } from '@shared/rebalance';
 import { api } from '@/lib/api';
 import { formatCents, parseAmountToCents } from '@/lib/money';
 import { AllocationDiagram, type DiagramFlight } from '@/components/diagram/AllocationDiagram';
 import { EmptyState } from '@/components/EmptyState';
 import { HistoryPanel } from '@/components/HistoryPanel';
-import { SettingsDialog } from '@/components/SettingsDialog';
+import { PortfolioEditor } from '@/components/editor/PortfolioEditor';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
 
 /** How long the tokens take to reach their boxes; the balances update as they land. */
 const FLIGHT_LANDING_MS = 750;
@@ -24,6 +25,15 @@ export default function App() {
   const [lastPlan, setLastPlan] = useState<AllocationPlan | null>(null);
   const [busy, setBusy] = useState<'investing' | 'undoing' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // `null` means "no explicit choice yet". Portfolio is `null` on first render, so this
+  // can't be computed in `useState`'s initializer; instead it's set once, in-render (not
+  // via an Effect — this is React's documented "adjusting state when a prop changes"
+  // pattern), the first time `portfolio` becomes available, and never overwritten after
+  // that so a later portfolio refresh doesn't clobber the user's manual toggle.
+  const [view, setView] = useState<'plan' | 'edit' | null>(null);
+  if (portfolio && view === null) {
+    setView(isFullyAllocated(portfolio) ? 'plan' : 'edit');
+  }
 
   const refreshHistory = useCallback(async () => {
     setHistory(await api.history());
@@ -114,6 +124,11 @@ export default function App() {
   const shown = preview ?? (flight ? flight.plan : null);
   const exhaustedAccounts = portfolio.accounts.filter((a) => a.roomRemainingCents === 0);
   const canInvest = parsed.cents !== null && busy === null && issues.length === 0;
+  // `view` is only ever `null` for the render(s) before the effect above fires, which
+  // happens the same tick `portfolio` first becomes non-null — by the time we're here
+  // (past the `!portfolio` early return) it's already been set. `?? 'edit'` just keeps
+  // the type-checker and runtime both honest about that.
+  const currentView = view ?? 'edit';
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-8 space-y-8">
@@ -129,103 +144,139 @@ export default function App() {
             <div className="text-xs text-muted-foreground">Portfolio value</div>
             <div className="text-xl font-semibold tabular-nums">{formatCents(portfolio.totalCents)}</div>
           </div>
-          <SettingsDialog portfolio={portfolio} onSaved={setPortfolio} />
+          <div className="inline-flex rounded-md border p-0.5">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className={cn(
+                'rounded-sm px-3',
+                currentView === 'plan' && 'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground',
+              )}
+              onClick={() => setView('plan')}
+            >
+              Plan
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className={cn(
+                'rounded-sm px-3',
+                currentView === 'edit' && 'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground',
+              )}
+              onClick={() => setView('edit')}
+            >
+              Edit
+            </Button>
+          </div>
         </div>
       </header>
 
-      {exhaustedAccounts.length > 0 && (
-        <Alert variant="destructive">
-          <AlertTitle>
-            {exhaustedAccounts.map((a) => a.label).join(' and ')} contribution room is used up
-          </AlertTitle>
-          <AlertDescription>
-            Deposits destined for {exhaustedAccounts.length > 1 ? 'those accounts' : 'that account'} will
-            be held back as cash rather than moved elsewhere. Update your room in Settings if this is
-            a new contribution year.
-          </AlertDescription>
-        </Alert>
-      )}
+      {currentView === 'edit' ? (
+        <PortfolioEditor portfolio={portfolio} onSaved={setPortfolio} />
+      ) : (
+        <>
+          {exhaustedAccounts.length > 0 && (
+            <Alert variant="destructive">
+              <AlertTitle>
+                {exhaustedAccounts.map((a) => a.label).join(' and ')} contribution room is used up
+              </AlertTitle>
+              <AlertDescription>
+                Deposits destined for {exhaustedAccounts.length > 1 ? 'those accounts' : 'that account'} will
+                be held back as cash rather than moved elsewhere. Update your room in the Edit view if this
+                is a new contribution year.
+              </AlertDescription>
+            </Alert>
+          )}
 
-      <section className="rounded-xl border p-4 space-y-4">
-        <form
-          className="flex flex-wrap items-start gap-3"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void invest();
-          }}
-        >
-          <div className="flex-1 min-w-56 space-y-1.5">
-            <label htmlFor="amount" className="text-sm font-medium">
-              Amount to invest
-            </label>
-            <div className="relative">
-              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                $
-              </span>
-              <Input
-                id="amount"
-                inputMode="decimal"
-                autoComplete="off"
-                placeholder="5,000.00"
-                className="pl-7 text-lg tabular-nums"
-                value={amount}
-                onChange={(event) => setAmount(event.target.value)}
-                aria-invalid={parsed.error !== null}
-                aria-describedby={parsed.error ? 'amount-error' : undefined}
-              />
-            </div>
-            {parsed.error && (
-              <p id="amount-error" className="text-sm text-destructive">
-                {parsed.error}
+          <section className="rounded-xl border p-4 space-y-4">
+            <form
+              className="flex flex-wrap items-start gap-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void invest();
+              }}
+            >
+              <div className="flex-1 min-w-56 space-y-1.5">
+                <label htmlFor="amount" className="text-sm font-medium">
+                  Amount to invest
+                </label>
+                <div className="relative">
+                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                    $
+                  </span>
+                  <Input
+                    id="amount"
+                    inputMode="decimal"
+                    autoComplete="off"
+                    placeholder="5,000.00"
+                    className="pl-7 text-lg tabular-nums"
+                    value={amount}
+                    onChange={(event) => setAmount(event.target.value)}
+                    aria-invalid={parsed.error !== null}
+                    aria-describedby={parsed.error ? 'amount-error' : undefined}
+                  />
+                </div>
+                {parsed.error && (
+                  <p id="amount-error" className="text-sm text-destructive">
+                    {parsed.error}
+                  </p>
+                )}
+              </div>
+
+              <Button type="submit" size="lg" className="mt-6.5" disabled={!canInvest}>
+                {busy === 'investing' ? 'Investing…' : 'Invest'}
+              </Button>
+            </form>
+
+            {issues.length > 0 && (
+              <p className="text-sm text-destructive">
+                {issues[0].message}{' '}
+                <button type="button" className="underline" onClick={() => setView('edit')}>
+                  Fix in Edit view
+                </button>
               </p>
             )}
-          </div>
 
-          <Button type="submit" size="lg" className="mt-6.5" disabled={!canInvest}>
-            {busy === 'investing' ? 'Investing…' : 'Invest'}
-          </Button>
-        </form>
+            {shown && shown.unallocatedCents > 0 && (
+              <p className="text-sm text-destructive">
+                {formatCents(shown.allocatedCents)} will be invested;{' '}
+                {formatCents(shown.unallocatedCents)} stays as cash because contribution room ran out in{' '}
+                {shown.cappedAccountIds
+                  .map((id) => portfolio.accounts.find((a) => a.id === id)?.label ?? id)
+                  .join(' and ')}
+                .
+              </p>
+            )}
 
-        {issues.length > 0 && (
-          <p className="text-sm text-destructive">{issues[0].message}</p>
-        )}
+            {preview && preview.unallocatedCents === 0 && (
+              <p className="text-sm text-muted-foreground">
+                All {formatCents(preview.requestedCents)} fits. Amounts flow to whichever sleeves sit
+                furthest below their target.
+              </p>
+            )}
 
-        {shown && shown.unallocatedCents > 0 && (
-          <p className="text-sm text-destructive">
-            {formatCents(shown.allocatedCents)} will be invested;{' '}
-            {formatCents(shown.unallocatedCents)} stays as cash because contribution room ran out in{' '}
-            {shown.cappedAccountIds
-              .map((id) => portfolio.accounts.find((a) => a.id === id)?.label ?? id)
-              .join(' and ')}
-            .
-          </p>
-        )}
+            {lastPlan && !preview && (
+              <p className="text-sm text-muted-foreground">
+                Last investment: {formatCents(lastPlan.allocatedCents)} allocated across{' '}
+                {lastPlan.lines.filter((line) => line.amountCents > 0).length} sleeves.
+              </p>
+            )}
 
-        {preview && preview.unallocatedCents === 0 && (
-          <p className="text-sm text-muted-foreground">
-            All {formatCents(preview.requestedCents)} fits. Amounts flow to whichever sleeves sit
-            furthest below their target.
-          </p>
-        )}
+            {error && <p className="text-sm text-destructive">{error}</p>}
+          </section>
 
-        {lastPlan && !preview && (
-          <p className="text-sm text-muted-foreground">
-            Last investment: {formatCents(lastPlan.allocatedCents)} allocated across{' '}
-            {lastPlan.lines.filter((line) => line.amountCents > 0).length} sleeves.
-          </p>
-        )}
+          <AllocationDiagram portfolio={portfolio} preview={preview} flight={flight} />
 
-        {error && <p className="text-sm text-destructive">{error}</p>}
-      </section>
-
-      <AllocationDiagram portfolio={portfolio} preview={preview} flight={flight} />
-
-      <HistoryPanel
-        history={history}
-        portfolio={portfolio}
-        onUndo={() => void undo()}
-        undoing={busy === 'undoing'}
-      />
+          <HistoryPanel
+            history={history}
+            portfolio={portfolio}
+            onUndo={() => void undo()}
+            undoing={busy === 'undoing'}
+          />
+        </>
+      )}
     </main>
   );
 }
