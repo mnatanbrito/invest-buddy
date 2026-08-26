@@ -4,7 +4,7 @@ import type { Pool } from 'pg';
 import { z } from 'zod';
 import { withTransaction } from './db/pool';
 import { deleteBlockers, nextSortOrder, readPortfolio, resequence } from './portfolio';
-import { allocationIssues, MAX_ACCOUNTS, toRebalanceUnits } from '../shared/allocation';
+import { allocationIssues, MAX_ACCOUNTS, MAX_SLEEVES, toRebalanceUnits } from '../shared/allocation';
 import { planDeposit } from '../shared/rebalance';
 import type { InvestmentRecord } from '../shared/types';
 
@@ -254,6 +254,100 @@ export function createApp(pool: Pool): Express {
           );
         }
         await client.query('DELETE FROM accounts WHERE id = $1', [accountId]);
+        return readPortfolio(client);
+      });
+      res.json(portfolio);
+    }),
+  );
+
+  app.post(
+    '/api/sleeves',
+    route(async (req, res) => {
+      const body = sleeveCreateSchema.parse(req.body);
+      const portfolio = await withTransaction(pool, async (client) => {
+        await client.query('LOCK TABLE accounts, sleeves, assets IN SHARE ROW EXCLUSIVE MODE');
+
+        const parent = await client.query('SELECT 1 FROM accounts WHERE id = $1', [body.accountId]);
+        if (parent.rows.length === 0) throw new HttpError(404, 'no account with that id');
+
+        const { rows } = await client.query<{ count: number }>(
+          'SELECT COUNT(*)::int AS count FROM sleeves',
+        );
+        if (rows[0].count >= MAX_SLEEVES) {
+          throw new HttpError(
+            409,
+            `a sleeve can't be created — the portfolio already has the maximum of ${MAX_SLEEVES}`,
+          );
+        }
+
+        const id = randomUUID();
+        const sortOrder = await nextSortOrder(client, 'sleeves', body.accountId);
+        await client.query(
+          'INSERT INTO sleeves (id, account_id, label, target_bps, sort_order) VALUES ($1, $2, $3, $4, $5)',
+          [id, body.accountId, body.label, body.targetBps, sortOrder],
+        );
+        return readPortfolio(client);
+      });
+      res.status(201).json(portfolio);
+    }),
+  );
+
+  app.patch(
+    '/api/sleeves/:id',
+    route(async (req, res) => {
+      const patch = sleevePatchSchema.parse(req.body);
+      const sleeveId = idSchema.parse(req.params.id);
+      const portfolio = await withTransaction(pool, async (client) => {
+        await client.query('LOCK TABLE accounts, sleeves, assets IN SHARE ROW EXCLUSIVE MODE');
+        const { rows } = await client.query('SELECT 1 FROM sleeves WHERE id = $1', [sleeveId]);
+        if (rows.length === 0) throw new HttpError(404, 'no sleeve with that id');
+
+        const { sortOrder, ...rest } = patch;
+        if (sortOrder !== undefined) {
+          await resequence(client, 'sleeves', sleeveId, sortOrder);
+        }
+        const columns: Record<string, unknown> = {};
+        if (rest.label !== undefined) columns.label = rest.label;
+        if (rest.targetBps !== undefined) columns.target_bps = rest.targetBps;
+        if (Object.keys(columns).length > 0) {
+          const { setClause, values } = buildUpdate(columns);
+          await client.query(`UPDATE sleeves SET ${setClause} WHERE id = $${values.length + 1}`, [
+            ...values,
+            sleeveId,
+          ]);
+        }
+        return readPortfolio(client);
+      });
+      res.json(portfolio);
+    }),
+  );
+
+  app.delete(
+    '/api/sleeves/:id',
+    route(async (req, res) => {
+      const sleeveId = idSchema.parse(req.params.id);
+      const portfolio = await withTransaction(pool, async (client) => {
+        await client.query('LOCK TABLE accounts, sleeves, assets IN SHARE ROW EXCLUSIVE MODE');
+        const { rows } = await client.query<{ label: string }>('SELECT label FROM sleeves WHERE id = $1', [
+          sleeveId,
+        ]);
+        if (rows.length === 0) throw new HttpError(404, 'no sleeve with that id');
+        const label = rows[0].label;
+
+        const { holdingCents, hasHistory } = await deleteBlockers(client, 'sleeve', sleeveId);
+        if (holdingCents > 0) {
+          throw new HttpError(
+            409,
+            `${label} holds ${formatCentsForMessage(holdingCents)} — move or zero out its holdings before deleting.`,
+          );
+        }
+        if (hasHistory) {
+          throw new HttpError(
+            409,
+            `${label} has past investments recorded — delete isn't allowed once a sleeve has investment history.`,
+          );
+        }
+        await client.query('DELETE FROM sleeves WHERE id = $1', [sleeveId]);
         return readPortfolio(client);
       });
       res.json(portfolio);

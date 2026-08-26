@@ -470,6 +470,154 @@ describe('DELETE /api/accounts/:id', () => {
   });
 });
 
+describe('POST /api/sleeves', () => {
+  it('creates a sleeve under an existing account and it appears in the portfolio', async () => {
+    const { body } = await request(app)
+      .post('/api/sleeves')
+      .send({ accountId: 'tfsa', label: 'Global bonds', targetBps: 500 })
+      .expect(201);
+
+    const portfolio = body as PortfolioState;
+    const created = portfolio.sleeves.find((s) => s.label === 'Global bonds')!;
+    expect(created).toBeDefined();
+    expect(created.accountId).toBe('tfsa');
+    expect(created.targetBps).toBe(500);
+    // tfsa already has sleeves at sortOrder 1-2, so the new one lands at 3.
+    expect(created.sortOrder).toBe(3);
+  });
+
+  it('404s on an unknown accountId', async () => {
+    const { body } = await request(app)
+      .post('/api/sleeves')
+      .send({ accountId: 'nope', label: 'Ghost', targetBps: 100 })
+      .expect(404);
+    expect(body.error).toBe('no account with that id');
+  });
+
+  it('rejects an out-of-range targetBps', async () => {
+    await request(app)
+      .post('/api/sleeves')
+      .send({ accountId: 'rrsp', label: 'Bad', targetBps: -1 })
+      .expect(400);
+    await request(app)
+      .post('/api/sleeves')
+      .send({ accountId: 'rrsp', label: 'Bad', targetBps: 10_001 })
+      .expect(400);
+  });
+
+  it('enforces the portfolio-wide maximum of 10 sleeves, regardless of which account', async () => {
+    // The example preset already has 5 sleeves across 3 accounts (2 in rrsp, 2 in
+    // tfsa, 1 in non_registered). Spread 5 more across those same accounts so no
+    // single account gets anywhere near 10 — the test only passes if the cap check
+    // counts across the whole `sleeves` table, not one scoped to an account_id.
+    const accountIds = ['rrsp', 'tfsa', 'non_registered', 'rrsp', 'tfsa'];
+    for (const [i, accountId] of accountIds.entries()) {
+      await request(app)
+        .post('/api/sleeves')
+        .send({ accountId, label: `Extra ${i}`, targetBps: 100 })
+        .expect(201);
+    }
+
+    const { body } = await request(app)
+      .post('/api/sleeves')
+      .send({ accountId: 'rrsp', label: 'One too many', targetBps: 100 })
+      .expect(409);
+    expect(body.error).toMatch(/10/);
+
+    const { rows } = await db.pool.query('SELECT COUNT(*)::int AS n FROM sleeves');
+    expect(rows[0].n).toBe(10);
+  });
+});
+
+describe('PATCH /api/sleeves/:id', () => {
+  it('updates label without clobbering targetBps', async () => {
+    const { body } = await request(app)
+      .patch('/api/sleeves/us_equity')
+      .send({ label: 'US market cap' })
+      .expect(200);
+    const sleeve = (body as PortfolioState).sleeves.find((s) => s.id === 'us_equity')!;
+    expect(sleeve.label).toBe('US market cap');
+    expect(sleeve.targetBps).toBe(4500);
+  });
+
+  it('updates targetBps without clobbering the label', async () => {
+    const { body } = await request(app)
+      .patch('/api/sleeves/us_equity')
+      .send({ targetBps: 4000 })
+      .expect(200);
+    const sleeve = (body as PortfolioState).sleeves.find((s) => s.id === 'us_equity')!;
+    expect(sleeve.targetBps).toBe(4000);
+    expect(sleeve.label).toBe('US total market');
+  });
+
+  it('moves a sleeve via sortOrder', async () => {
+    // us_equity starts at sortOrder 1 within rrsp; move it to sortOrder 2.
+    await request(app).patch('/api/sleeves/us_equity').send({ sortOrder: 2 }).expect(200);
+    const { body } = await request(app).get('/api/portfolio').expect(200);
+    const sleeve = (body as PortfolioState).sleeves.find((s) => s.id === 'us_equity')!;
+    expect(sleeve.sortOrder).toBe(2);
+  });
+
+  it('404s on an unknown id', async () => {
+    const { body } = await request(app).patch('/api/sleeves/nope').send({ label: 'X' }).expect(404);
+    expect(body.error).toBe('no sleeve with that id');
+  });
+
+  it('rejects an empty patch body', async () => {
+    await request(app).patch('/api/sleeves/us_equity').send({}).expect(400);
+  });
+});
+
+describe('DELETE /api/sleeves/:id', () => {
+  it('deletes a fresh sleeve with no holdings/history and cascades away its assets', async () => {
+    const { body: created } = await request(app)
+      .post('/api/sleeves')
+      .send({ accountId: 'non_registered', label: 'Throwaway sleeve', targetBps: 0 })
+      .expect(201);
+    const newId = (created as PortfolioState).sleeves.find((s) => s.label === 'Throwaway sleeve')!.id;
+
+    await db.pool.query(
+      `INSERT INTO assets (id, sleeve_id, ticker, label, weight_bps, sort_order)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [`${newId}_asset`, newId, 'XYZ', '', 10_000, 1],
+    );
+
+    await request(app).delete(`/api/sleeves/${newId}`).expect(200);
+
+    const { body } = await request(app).get('/api/portfolio').expect(200);
+    expect((body as PortfolioState).sleeves.find((s) => s.id === newId)).toBeUndefined();
+
+    const { rows } = await db.pool.query('SELECT COUNT(*)::int AS n FROM assets WHERE sleeve_id = $1', [
+      newId,
+    ]);
+    expect(rows[0].n).toBe(0);
+  });
+
+  it('refuses to delete a sleeve with nonzero holdings, mentioning the label and amount', async () => {
+    await invest(1_000_000).expect(200);
+
+    const { body } = await request(app).delete('/api/sleeves/us_equity').expect(409);
+    expect(body.error).toMatch(/US total market/);
+    expect(body.error).toMatch(/\$/);
+  });
+
+  it('refuses to delete a sleeve with investment history even once holdings are zeroed', async () => {
+    await invest(1_000_000).expect(200);
+    await request(app)
+      .put('/api/holdings')
+      .send({ holdings: { us_equity_vti: 0 } })
+      .expect(200);
+
+    const { body } = await request(app).delete('/api/sleeves/us_equity').expect(409);
+    expect(body.error).toMatch(/history/);
+  });
+
+  it('404s on an unknown id', async () => {
+    const { body } = await request(app).delete('/api/sleeves/nope').expect(404);
+    expect(body.error).toBe('no sleeve with that id');
+  });
+});
+
 describe('POST /api/preview', () => {
   it('reports the same split as investing, without writing anything', async () => {
     const { body: preview } = await request(app)
