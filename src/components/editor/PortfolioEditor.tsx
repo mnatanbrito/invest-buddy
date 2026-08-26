@@ -29,17 +29,15 @@ export function PortfolioEditor({ portfolio, onSaved }: PortfolioEditorProps) {
             of 100%
           </p>
         </div>
-        <AccountDialog
-          onSaved={onSaved}
-          trigger={
-            <Button
-              disabled={accountsMaxed}
-              title={accountsMaxed ? `Portfolio already has ${MAX_ACCOUNTS} accounts` : undefined}
-            >
-              Add account
-            </Button>
-          }
-        />
+        <div className="flex flex-col items-end gap-1">
+          <AccountDialog
+            onSaved={onSaved}
+            trigger={<Button disabled={accountsMaxed}>Add account</Button>}
+          />
+          {accountsMaxed && (
+            <span className="text-xs text-muted-foreground">Maximum of {MAX_ACCOUNTS} accounts reached</span>
+          )}
+        </div>
       </header>
 
       <div className="space-y-4">

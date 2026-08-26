@@ -102,20 +102,22 @@ export function AccountCard({
       <CardContent className="space-y-3">
         <div className="flex items-center justify-between gap-2">
           <h3 className="text-sm font-medium">Sleeves</h3>
-          <SleeveDialog
-            accountId={account.id}
-            onSaved={onSaved}
-            trigger={
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={sleevesMaxed}
-                title={sleevesMaxed ? `Portfolio already has ${MAX_SLEEVES} sleeves` : undefined}
-              >
-                Add sleeve
-              </Button>
-            }
-          />
+          <div className="flex flex-col items-end gap-1">
+            <SleeveDialog
+              accountId={account.id}
+              onSaved={onSaved}
+              trigger={
+                <Button variant="outline" size="sm" disabled={sleevesMaxed}>
+                  Add sleeve
+                </Button>
+              }
+            />
+            {sleevesMaxed && (
+              <span className="text-xs text-muted-foreground">
+                The portfolio already has the maximum of {MAX_SLEEVES} sleeves
+              </span>
+            )}
+          </div>
         </div>
 
         {sleeves.length === 0 ? (

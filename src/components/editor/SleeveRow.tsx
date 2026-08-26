@@ -92,20 +92,22 @@ export function SleeveRow({ sleeve, siblingSleeves, onSaved }: SleeveRowProps) {
 
       <div className="flex items-center justify-between gap-2">
         <h4 className="text-xs font-medium text-muted-foreground">Assets</h4>
-        <AssetDialog
-          sleeveId={sleeve.id}
-          onSaved={onSaved}
-          trigger={
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={assetsMaxed}
-              title={assetsMaxed ? `This sleeve already has ${MAX_ASSETS_PER_SLEEVE} assets` : undefined}
-            >
-              Add asset
-            </Button>
-          }
-        />
+        <div className="flex flex-col items-end gap-1">
+          <AssetDialog
+            sleeveId={sleeve.id}
+            onSaved={onSaved}
+            trigger={
+              <Button variant="outline" size="sm" disabled={assetsMaxed}>
+                Add asset
+              </Button>
+            }
+          />
+          {assetsMaxed && (
+            <span className="text-xs text-muted-foreground">
+              Maximum of {MAX_ASSETS_PER_SLEEVE} assets reached
+            </span>
+          )}
+        </div>
       </div>
 
       {sleeve.assets.length === 0 ? (
