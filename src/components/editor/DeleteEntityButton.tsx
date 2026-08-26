@@ -23,7 +23,7 @@ export interface DeleteEntityButtonProps {
 /**
  * A small reusable confirm-then-delete trigger shared by account/sleeve/asset
  * rows and cards. Mounted-only-while-open via Radix unmounting (same pattern
- * as `SettingsDialog`), so a cancelled or failed attempt never leaves stale
+ * as `AssetDialog`), so a cancelled or failed attempt never leaves stale
  * error state behind the next time the dialog opens.
  */
 export function DeleteEntityButton({ entityLabel, onDelete }: DeleteEntityButtonProps) {

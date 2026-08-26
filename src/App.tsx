@@ -28,10 +28,13 @@ export default function App() {
   // `null` means "no explicit choice yet". Portfolio is `null` on first render, so this
   // can't be computed in `useState`'s initializer; instead it's set once, in-render (not
   // via an Effect — this is React's documented "adjusting state when a prop changes"
-  // pattern), the first time `portfolio` becomes available, and never overwritten after
-  // that so a later portfolio refresh doesn't clobber the user's manual toggle.
+  // pattern), the first time `portfolio` has accounts to show, and never overwritten
+  // after that so a later portfolio refresh doesn't clobber the user's manual toggle.
+  // The `accounts.length > 0` check matters: on a fresh database the first non-null
+  // portfolio is the empty one (rendered as `EmptyState` below), which would otherwise
+  // lock `view` to `'edit'` before the user ever loads a real portfolio.
   const [view, setView] = useState<'plan' | 'edit' | null>(null);
-  if (portfolio && view === null) {
+  if (portfolio && portfolio.accounts.length > 0 && view === null) {
     setView(isFullyAllocated(portfolio) ? 'plan' : 'edit');
   }
 
@@ -124,10 +127,10 @@ export default function App() {
   const shown = preview ?? (flight ? flight.plan : null);
   const exhaustedAccounts = portfolio.accounts.filter((a) => a.roomRemainingCents === 0);
   const canInvest = parsed.cents !== null && busy === null && issues.length === 0;
-  // `view` is only ever `null` for the render(s) before the effect above fires, which
-  // happens the same tick `portfolio` first becomes non-null — by the time we're here
-  // (past the `!portfolio` early return) it's already been set. `?? 'edit'` just keeps
-  // the type-checker and runtime both honest about that.
+  // `view` is only ever `null` before the render-phase assignment above runs, which
+  // happens the same render `portfolio` first has accounts — by the time we're here
+  // (past the `!portfolio` and empty-accounts early returns) it's already been set.
+  // `?? 'edit'` just keeps the type-checker and runtime both honest about that.
   const currentView = view ?? 'edit';
 
   return (
