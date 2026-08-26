@@ -1,7 +1,14 @@
 import { useMemo } from 'react';
 import type { AllocationPlan, PortfolioState } from '@shared/types';
 import { formatBps, formatCentsShort, formatDriftBps } from '@/lib/money';
-import { CANVAS, FLOW_ORIGIN, layoutDiagram, type BoxGeometry } from './layout';
+import { layoutDiagram, type BoxGeometry } from './layout';
+
+// NOTE: this component still renders the OLD one-line-per-sleeve geometry (a
+// single ticker line, no AssetRowGeometry rows). This is a deliberate
+// placeholder patch (Task 12) to keep the build green after layout.ts's
+// shape changed to DiagramLayout/canvas/flowOrigin/panel.holdingCents/
+// AssetRowGeometry — it is NOT the real Stage-6 rendering rewrite. Task 13
+// replaces this file's rendering logic to consume per-asset rows properly.
 
 export interface DiagramFlight {
   /** Bumped on every execution so React remounts the tokens and replays the animation. */
@@ -34,10 +41,11 @@ function wrap(text: string, maxChars: number): string[] {
 }
 
 export function AllocationDiagram({ portfolio, preview, flight }: AllocationDiagramProps) {
-  const panels = useMemo(
+  const layout = useMemo(
     () => layoutDiagram(portfolio.accounts, portfolio.sleeves),
     [portfolio.accounts, portfolio.sleeves],
   );
+  const { canvas, flowOrigin, panels } = layout;
 
   const previewBySleeve = useMemo(
     () => new Map((preview?.lines ?? []).map((line) => [line.sleeveId, line])),
@@ -56,7 +64,7 @@ export function AllocationDiagram({ portfolio, preview, flight }: AllocationDiag
 
   return (
     <svg
-      viewBox={`0 0 ${CANVAS.width} ${CANVAS.height}`}
+      viewBox={`0 0 ${canvas.width} ${canvas.height}`}
       className="w-full h-auto select-none"
       role="img"
       aria-label="Target allocation across RRSP, TFSA and non-registered accounts"
@@ -162,15 +170,15 @@ export function AllocationDiagram({ portfolio, preview, flight }: AllocationDiag
             return (
               <g
                 key={line.sleeveId}
-                transform={`translate(${FLOW_ORIGIN.x}, ${FLOW_ORIGIN.y})`}
+                transform={`translate(${flowOrigin.x}, ${flowOrigin.y})`}
                 className={`acct-${line.accountId}`}
               >
                 <g
                   className="flow-token"
                   style={
                     {
-                      '--dx': `${box.centerX - FLOW_ORIGIN.x}px`,
-                      '--dy': `${box.centerY - FLOW_ORIGIN.y}px`,
+                      '--dx': `${box.centerX - flowOrigin.x}px`,
+                      '--dy': `${box.centerY - flowOrigin.y}px`,
                       '--delay': `${flightDelay.get(line.sleeveId) ?? 0}s`,
                     } as React.CSSProperties
                   }
