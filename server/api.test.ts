@@ -618,6 +618,192 @@ describe('DELETE /api/sleeves/:id', () => {
   });
 });
 
+describe('POST /api/assets', () => {
+  it('creates an asset under an existing sleeve and it appears in the portfolio', async () => {
+    const { body } = await request(app)
+      .post('/api/assets')
+      .send({ sleeveId: 'cad_bonds', ticker: 'zag', label: 'Extra bonds', weightBps: 3000 })
+      .expect(201);
+
+    const portfolio = body as PortfolioState;
+    const sleeve = portfolio.sleeves.find((s) => s.id === 'cad_bonds')!;
+    const created = sleeve.assets.find((a) => a.ticker === 'ZAG')!;
+    expect(created).toBeDefined();
+    expect(created.sleeveId).toBe('cad_bonds');
+    expect(created.ticker).toBe('ZAG');
+    expect(created.label).toBe('Extra bonds');
+    expect(created.weightBps).toBe(3000);
+    expect(created.holdingCents).toBe(0);
+  });
+
+  it('404s on an unknown sleeveId', async () => {
+    const { body } = await request(app)
+      .post('/api/assets')
+      .send({ sleeveId: 'nope', ticker: 'ZZZ', weightBps: 100 })
+      .expect(404);
+    expect(body.error).toBe('no sleeve with that id');
+  });
+
+  it('rejects an out-of-range weightBps', async () => {
+    await request(app)
+      .post('/api/assets')
+      .send({ sleeveId: 'cad_bonds', ticker: 'ZAG', weightBps: -1 })
+      .expect(400);
+    await request(app)
+      .post('/api/assets')
+      .send({ sleeveId: 'cad_bonds', ticker: 'ZAG', weightBps: 10_001 })
+      .expect(400);
+  });
+
+  it('409s on a duplicate ticker within the same sleeve, but the same ticker succeeds in a different sleeve', async () => {
+    // us_equity already holds VTI.
+    const dup = await request(app)
+      .post('/api/assets')
+      .send({ sleeveId: 'us_equity', ticker: 'VTI', weightBps: 100 })
+      .expect(409);
+    expect(dup.body.error).toMatch(/VTI/);
+
+    // Uniqueness is per-sleeve, not global: the same ticker in a different sleeve is fine.
+    const { body } = await request(app)
+      .post('/api/assets')
+      .send({ sleeveId: 'cad_bonds', ticker: 'VTI', weightBps: 100 })
+      .expect(201);
+    const sleeve = (body as PortfolioState).sleeves.find((s) => s.id === 'cad_bonds')!;
+    expect(sleeve.assets.find((a) => a.ticker === 'VTI')).toBeDefined();
+  });
+
+  it('enforces the per-sleeve maximum of 10 assets without blocking other sleeves', async () => {
+    // us_equity already has 1 asset (VTI); 9 more reaches the cap of 10.
+    for (let i = 0; i < 9; i++) {
+      await request(app)
+        .post('/api/assets')
+        .send({ sleeveId: 'us_equity', ticker: `X${i}`, weightBps: 100 })
+        .expect(201);
+    }
+
+    const { body } = await request(app)
+      .post('/api/assets')
+      .send({ sleeveId: 'us_equity', ticker: 'ONETOOMANY', weightBps: 100 })
+      .expect(409);
+    expect(body.error).toMatch(/10/);
+
+    const { rows } = await db.pool.query('SELECT COUNT(*)::int AS n FROM assets WHERE sleeve_id = $1', [
+      'us_equity',
+    ]);
+    expect(rows[0].n).toBe(10);
+
+    // A different sleeve, nowhere near the cap, must still accept a new asset —
+    // proving the cap is scoped to the sleeve, not the whole portfolio.
+    await request(app)
+      .post('/api/assets')
+      .send({ sleeveId: 'cad_bonds', ticker: 'STILLOK', weightBps: 100 })
+      .expect(201);
+  });
+});
+
+describe('PATCH /api/assets/:id', () => {
+  it('updates ticker, label, and weightBps independently without clobbering each other', async () => {
+    const { body: afterTicker } = await request(app)
+      .patch('/api/assets/us_equity_vti')
+      .send({ ticker: 'vun' })
+      .expect(200);
+    let asset = (afterTicker as PortfolioState).sleeves
+      .flatMap((s) => s.assets)
+      .find((a) => a.id === 'us_equity_vti')!;
+    expect(asset.ticker).toBe('VUN');
+    expect(asset.weightBps).toBe(10_000);
+
+    const { body: afterLabel } = await request(app)
+      .patch('/api/assets/us_equity_vti')
+      .send({ label: 'US total market fund' })
+      .expect(200);
+    asset = (afterLabel as PortfolioState).sleeves.flatMap((s) => s.assets).find((a) => a.id === 'us_equity_vti')!;
+    expect(asset.label).toBe('US total market fund');
+    expect(asset.ticker).toBe('VUN');
+
+    const { body: afterWeight } = await request(app)
+      .patch('/api/assets/us_equity_vti')
+      .send({ weightBps: 5000 })
+      .expect(200);
+    asset = (afterWeight as PortfolioState).sleeves.flatMap((s) => s.assets).find((a) => a.id === 'us_equity_vti')!;
+    expect(asset.weightBps).toBe(5000);
+    expect(asset.label).toBe('US total market fund');
+    expect(asset.ticker).toBe('VUN');
+  });
+
+  it('409s when changing ticker to collide with a sibling asset in the same sleeve', async () => {
+    await request(app)
+      .post('/api/assets')
+      .send({ sleeveId: 'us_equity', ticker: 'ITOT', weightBps: 100 })
+      .expect(201);
+
+    const { body } = await request(app).patch('/api/assets/us_equity_vti').send({ ticker: 'itot' }).expect(409);
+    expect(body.error).toMatch(/ITOT/);
+  });
+
+  it('moves an asset via sortOrder', async () => {
+    await request(app)
+      .post('/api/assets')
+      .send({ sleeveId: 'us_equity', ticker: 'EXTRA', weightBps: 100 })
+      .expect(201);
+
+    await request(app).patch('/api/assets/us_equity_vti').send({ sortOrder: 2 }).expect(200);
+    const { body } = await request(app).get('/api/portfolio').expect(200);
+    const asset = (body as PortfolioState).sleeves.flatMap((s) => s.assets).find((a) => a.id === 'us_equity_vti')!;
+    expect(asset.sortOrder).toBe(2);
+  });
+
+  it('404s on an unknown id', async () => {
+    const { body } = await request(app).patch('/api/assets/nope').send({ label: 'X' }).expect(404);
+    expect(body.error).toBe('no asset with that id');
+  });
+
+  it('rejects an empty patch body', async () => {
+    await request(app).patch('/api/assets/us_equity_vti').send({}).expect(400);
+  });
+});
+
+describe('DELETE /api/assets/:id', () => {
+  it('deletes a fresh asset with no holdings/history', async () => {
+    const { body: created } = await request(app)
+      .post('/api/assets')
+      .send({ sleeveId: 'cad_bonds', ticker: 'ZAG', weightBps: 100 })
+      .expect(201);
+    const newId = (created as PortfolioState).sleeves
+      .flatMap((s) => s.assets)
+      .find((a) => a.ticker === 'ZAG')!.id;
+
+    await request(app).delete(`/api/assets/${newId}`).expect(200);
+
+    const { body } = await request(app).get('/api/portfolio').expect(200);
+    expect((body as PortfolioState).sleeves.flatMap((s) => s.assets).find((a) => a.id === newId)).toBeUndefined();
+  });
+
+  it('refuses to delete an asset with nonzero holdings, mentioning the ticker and amount', async () => {
+    await invest(1_000_000).expect(200);
+
+    const { body } = await request(app).delete('/api/assets/us_equity_vti').expect(409);
+    expect(body.error).toMatch(/VTI/);
+    expect(body.error).toMatch(/\$/);
+  });
+
+  it('refuses to delete an asset with investment history even once holdings are zeroed', async () => {
+    await invest(1_000_000).expect(200);
+    await request(app)
+      .put('/api/holdings')
+      .send({ holdings: { us_equity_vti: 0 } })
+      .expect(200);
+
+    const { body } = await request(app).delete('/api/assets/us_equity_vti').expect(409);
+    expect(body.error).toMatch(/history/);
+  });
+
+  it('404s on an unknown id', async () => {
+    const { body } = await request(app).delete('/api/assets/nope').expect(404);
+    expect(body.error).toBe('no asset with that id');
+  });
+});
+
 describe('POST /api/preview', () => {
   it('reports the same split as investing, without writing anything', async () => {
     const { body: preview } = await request(app)

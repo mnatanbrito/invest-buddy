@@ -4,7 +4,13 @@ import type { Pool } from 'pg';
 import { z } from 'zod';
 import { withTransaction } from './db/pool';
 import { deleteBlockers, nextSortOrder, readPortfolio, resequence } from './portfolio';
-import { allocationIssues, MAX_ACCOUNTS, MAX_SLEEVES, toRebalanceUnits } from '../shared/allocation';
+import {
+  allocationIssues,
+  MAX_ACCOUNTS,
+  MAX_ASSETS_PER_SLEEVE,
+  MAX_SLEEVES,
+  toRebalanceUnits,
+} from '../shared/allocation';
 import { planDeposit } from '../shared/rebalance';
 import type { InvestmentRecord } from '../shared/types';
 
@@ -348,6 +354,116 @@ export function createApp(pool: Pool): Express {
           );
         }
         await client.query('DELETE FROM sleeves WHERE id = $1', [sleeveId]);
+        return readPortfolio(client);
+      });
+      res.json(portfolio);
+    }),
+  );
+
+  app.post(
+    '/api/assets',
+    route(async (req, res) => {
+      const body = assetCreateSchema.parse(req.body);
+      const portfolio = await withTransaction(pool, async (client) => {
+        await client.query('LOCK TABLE accounts, sleeves, assets IN SHARE ROW EXCLUSIVE MODE');
+
+        const parent = await client.query('SELECT 1 FROM sleeves WHERE id = $1', [body.sleeveId]);
+        if (parent.rows.length === 0) throw new HttpError(404, 'no sleeve with that id');
+
+        const { rows } = await client.query<{ count: number }>(
+          'SELECT COUNT(*)::int AS count FROM assets WHERE sleeve_id = $1',
+          [body.sleeveId],
+        );
+        if (rows[0].count >= MAX_ASSETS_PER_SLEEVE) {
+          throw new HttpError(
+            409,
+            `an asset can't be created — this sleeve already has the maximum of ${MAX_ASSETS_PER_SLEEVE}`,
+          );
+        }
+
+        const id = randomUUID();
+        const sortOrder = await nextSortOrder(client, 'assets', body.sleeveId);
+        try {
+          await client.query(
+            'INSERT INTO assets (id, sleeve_id, ticker, label, weight_bps, sort_order) VALUES ($1, $2, $3, $4, $5, $6)',
+            [id, body.sleeveId, body.ticker, body.label, body.weightBps, sortOrder],
+          );
+        } catch (error) {
+          if ((error as { code?: string }).code === '23505') {
+            throw new HttpError(409, `that sleeve already holds ${body.ticker}`);
+          }
+          throw error;
+        }
+        return readPortfolio(client);
+      });
+      res.status(201).json(portfolio);
+    }),
+  );
+
+  app.patch(
+    '/api/assets/:id',
+    route(async (req, res) => {
+      const patch = assetPatchSchema.parse(req.body);
+      const assetId = idSchema.parse(req.params.id);
+      const portfolio = await withTransaction(pool, async (client) => {
+        await client.query('LOCK TABLE accounts, sleeves, assets IN SHARE ROW EXCLUSIVE MODE');
+        const { rows } = await client.query('SELECT 1 FROM assets WHERE id = $1', [assetId]);
+        if (rows.length === 0) throw new HttpError(404, 'no asset with that id');
+
+        const { sortOrder, ...rest } = patch;
+        if (sortOrder !== undefined) {
+          await resequence(client, 'assets', assetId, sortOrder);
+        }
+        const columns: Record<string, unknown> = {};
+        if (rest.ticker !== undefined) columns.ticker = rest.ticker;
+        if (rest.label !== undefined) columns.label = rest.label;
+        if (rest.weightBps !== undefined) columns.weight_bps = rest.weightBps;
+        if (Object.keys(columns).length > 0) {
+          const { setClause, values } = buildUpdate(columns);
+          try {
+            await client.query(`UPDATE assets SET ${setClause} WHERE id = $${values.length + 1}`, [
+              ...values,
+              assetId,
+            ]);
+          } catch (error) {
+            if ((error as { code?: string }).code === '23505') {
+              throw new HttpError(409, `that sleeve already holds ${rest.ticker}`);
+            }
+            throw error;
+          }
+        }
+        return readPortfolio(client);
+      });
+      res.json(portfolio);
+    }),
+  );
+
+  app.delete(
+    '/api/assets/:id',
+    route(async (req, res) => {
+      const assetId = idSchema.parse(req.params.id);
+      const portfolio = await withTransaction(pool, async (client) => {
+        await client.query('LOCK TABLE accounts, sleeves, assets IN SHARE ROW EXCLUSIVE MODE');
+        const { rows } = await client.query<{ ticker: string }>('SELECT ticker FROM assets WHERE id = $1', [
+          assetId,
+        ]);
+        if (rows.length === 0) throw new HttpError(404, 'no asset with that id');
+        const ticker = rows[0].ticker;
+
+        const { holdingCents, hasHistory } = await deleteBlockers(client, 'asset', assetId);
+        if (holdingCents > 0) {
+          throw new HttpError(
+            409,
+            `${ticker} holds ${formatCentsForMessage(holdingCents)} — move or zero out its holdings before deleting.`,
+          );
+        }
+        if (hasHistory) {
+          throw new HttpError(
+            409,
+            `${ticker} has past investments recorded — delete isn't allowed once an asset has investment history.`,
+          );
+        }
+        await client.query('DELETE FROM assets WHERE id = $1', [assetId]);
         return readPortfolio(client);
       });
       res.json(portfolio);
