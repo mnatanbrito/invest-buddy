@@ -35,6 +35,17 @@ function wrap(text: string, maxChars: number): string[] {
 
 const accountListFormatter = new Intl.ListFormat('en-CA', { style: 'long', type: 'conjunction' });
 
+/** Number of `.acct-color-N` slots defined in src/index.css; panel color cycles past this. */
+const PALETTE_SIZE = 10;
+
+/** Panels are colored by their INDEX (position in the accounts array), not by account id —
+ *  account ids are random UUIDs once created through the editor, so there's no way to key a
+ *  fixed CSS class off them the way the original 3-account preset's ids ('rrsp'/'tfsa'/
+ *  'non_registered') allowed. */
+function panelColorClass(index: number): string {
+  return `acct-color-${index % PALETTE_SIZE}`;
+}
+
 export function AllocationDiagram({ portfolio, preview, flight }: AllocationDiagramProps) {
   const layout = useMemo(
     () => layoutDiagram(portfolio.accounts, portfolio.sleeves),
@@ -54,6 +65,14 @@ export function AllocationDiagram({ portfolio, preview, flight }: AllocationDiag
         for (const row of box.rows) map.set(row.asset.id, row);
       }
     }
+    return map;
+  }, [panels]);
+
+  /** Account id -> its panel's index, so flow tokens (keyed by accountId) can be colored
+   *  the same way panels are: by position, not by the account's (possibly random) id. */
+  const panelIndexByAccountId = useMemo(() => {
+    const map = new Map<string, number>();
+    panels.forEach((panel, index) => map.set(panel.account.id, index));
     return map;
   }, [panels]);
 
@@ -87,13 +106,13 @@ export function AllocationDiagram({ portfolio, preview, flight }: AllocationDiag
           </pattern>
         </defs>
 
-        {panels.map((panel) => {
+        {panels.map((panel, panelIndex) => {
           const { account } = panel;
           const exhausted = account.roomRemainingCents === 0;
           const noteLines = wrap(account.note, 30);
 
           return (
-            <g key={account.id} className={`acct-${account.id}`}>
+            <g key={account.id} className={panelColorClass(panelIndex)}>
               <rect
                 x={panel.x}
                 y={panel.y}
@@ -172,11 +191,12 @@ export function AllocationDiagram({ portfolio, preview, flight }: AllocationDiag
             {flownLines.map((line) => {
               const row = rowsById.get(line.assetId);
               if (!row) return null;
+              const panelIndex = panelIndexByAccountId.get(line.accountId) ?? 0;
               return (
                 <g
                   key={line.assetId}
                   transform={`translate(${flowOrigin.x}, ${flowOrigin.y})`}
-                  className={`acct-${line.accountId}`}
+                  className={panelColorClass(panelIndex)}
                 >
                   <g
                     className="flow-token"
