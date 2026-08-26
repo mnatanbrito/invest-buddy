@@ -4,6 +4,7 @@ import type { Pool } from 'pg';
 import { z } from 'zod';
 import { withTransaction } from './db/pool';
 import { deleteBlockers, nextSortOrder, readPortfolio, resequence } from './portfolio';
+import { EXAMPLE_PORTFOLIO, insertPortfolio } from './presets/example';
 import {
   allocationIssues,
   MAX_ACCOUNTS,
@@ -467,6 +468,21 @@ export function createApp(pool: Pool): Express {
         return readPortfolio(client);
       });
       res.json(portfolio);
+    }),
+  );
+
+  app.post(
+    '/api/presets/example',
+    route(async (_req, res) => {
+      const portfolio = await withTransaction(pool, async (client) => {
+        const { rows } = await client.query<{ count: number }>('SELECT COUNT(*)::int AS count FROM accounts');
+        if (rows[0].count > 0) {
+          throw new HttpError(409, 'the example portfolio can only be loaded into an empty portfolio');
+        }
+        await insertPortfolio(client, EXAMPLE_PORTFOLIO);
+        return readPortfolio(client);
+      });
+      res.status(201).json(portfolio);
     }),
   );
 

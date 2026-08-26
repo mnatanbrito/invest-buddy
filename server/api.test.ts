@@ -824,3 +824,43 @@ describe('POST /api/preview', () => {
     expect(body.error).toMatch(/not 100%/);
   });
 });
+
+describe('POST /api/presets/example', () => {
+  it('loads the example portfolio into an empty database', async () => {
+    await db.reset();
+    const { body } = await request(app).post('/api/presets/example').expect(201);
+
+    const portfolio = body as PortfolioState;
+    expect(portfolio.accounts).toHaveLength(3);
+    expect(portfolio.accounts.map((a) => a.label)).toEqual(['RRSP', 'TFSA', 'Non-registered']);
+    expect(portfolio.sleeves).toHaveLength(5);
+    expect(portfolio.sleeves.map((s) => s.id)).toEqual(['us_equity', 'cad_bonds', 'cad_equity', 'intl_equity', 'em_equity']);
+
+    const assetCount = portfolio.sleeves.reduce((sum, s) => sum + s.assets.length, 0);
+    expect(assetCount).toBe(5);
+    for (const sleeve of portfolio.sleeves) {
+      expect(sleeve.assets).toHaveLength(1);
+    }
+
+    const usEquityAsset = portfolio.sleeves.find((s) => s.id === 'us_equity')!.assets[0]!;
+    expect(usEquityAsset.id).toBe('us_equity_vti');
+    expect(usEquityAsset.ticker).toBe('VTI');
+  });
+
+  it('returns 409 with appropriate message when portfolio is not empty', async () => {
+    const { body } = await request(app).post('/api/presets/example').expect(409);
+    expect(body.error).toBe('the example portfolio can only be loaded into an empty portfolio');
+  });
+
+  it('does not duplicate or modify data when the portfolio is not empty', async () => {
+    const { body: before } = await request(app).get('/api/portfolio').expect(200);
+    const accountCountBefore = (before as PortfolioState).accounts.length;
+    expect(accountCountBefore).toBe(3);
+
+    await request(app).post('/api/presets/example').expect(409);
+
+    const { body: after } = await request(app).get('/api/portfolio').expect(200);
+    const accountCountAfter = (after as PortfolioState).accounts.length;
+    expect(accountCountAfter).toBe(3);
+  });
+});
