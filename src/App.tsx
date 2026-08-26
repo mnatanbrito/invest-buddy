@@ -5,6 +5,7 @@ import { planDeposit } from '@shared/rebalance';
 import { api } from '@/lib/api';
 import { formatCents, parseAmountToCents } from '@/lib/money';
 import { AllocationDiagram, type DiagramFlight } from '@/components/diagram/AllocationDiagram';
+import { EmptyState } from '@/components/EmptyState';
 import { HistoryPanel } from '@/components/HistoryPanel';
 import { SettingsDialog } from '@/components/SettingsDialog';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -104,6 +105,10 @@ export default function App() {
 
   if (!portfolio) {
     return <main className="mx-auto max-w-2xl p-8 text-muted-foreground">Loading portfolio…</main>;
+  }
+
+  if (portfolio.accounts.length === 0) {
+    return <EmptyState onLoaded={setPortfolio} />;
   }
 
   const shown = preview ?? (flight ? flight.plan : null);

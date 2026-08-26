@@ -27,6 +27,8 @@ export interface InvestResult {
 export const api = {
   portfolio: () => request<PortfolioState>('/api/portfolio'),
 
+  loadExample: () => request<PortfolioState>('/api/presets/example', { method: 'POST' }),
+
   preview: (amountCents: number) =>
     request<AllocationPlan>('/api/preview', {
       method: 'POST',
