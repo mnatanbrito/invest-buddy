@@ -120,6 +120,16 @@ export async function nextSortOrder(
   return rows[0].next;
 }
 
+/** Update an entity's sort_order to a new position. */
+export async function resequence(
+  client: PoolClient,
+  table: SortableTable,
+  id: string,
+  sortOrder: number,
+): Promise<void> {
+  await client.query(`UPDATE ${table} SET sort_order = $1 WHERE id = $2`, [sortOrder, id]);
+}
+
 export async function readPortfolio(client: PoolClient): Promise<PortfolioState> {
   const [accountsResult, sleevesResult, assetsResult] = await Promise.all([
     client.query<AccountRow>(ACCOUNTS_QUERY),

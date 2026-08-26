@@ -43,6 +43,79 @@ const holdingsSchema = z.object({
   holdings: z.record(z.string(), centsSchema),
 });
 
+const labelSchema = z
+  .string()
+  .trim()
+  .min(1, 'label is required')
+  .max(60, 'label is too long');
+
+const tickerSchema = z
+  .string()
+  .trim()
+  .min(1, 'ticker is required')
+  .max(12, 'ticker is too long')
+  .transform((s) => s.toUpperCase());
+
+const bpsSchema = z.number().int('must be a whole number').min(0).max(10_000);
+
+const idSchema = z.string().trim().min(1, 'id is required');
+
+const sortSchema = z.number().int().positive();
+
+const noteSchema = z.string().trim().max(500).optional().default('');
+
+export const accountCreateSchema = z.object({
+  label: labelSchema,
+  note: noteSchema,
+  roomLimitCents: centsSchema.nullable().optional().default(null),
+});
+
+export const accountPatchSchema = z
+  .object({
+    label: labelSchema.optional(),
+    note: noteSchema,
+    roomLimitCents: centsSchema.nullable().optional(),
+    sortOrder: sortSchema.optional(),
+  })
+  .refine((o) => Object.keys(o).length > 0, 'nothing to update');
+
+export const sleeveCreateSchema = z.object({
+  accountId: idSchema,
+  label: labelSchema,
+  targetBps: bpsSchema,
+});
+
+export const sleevePatchSchema = z
+  .object({
+    label: labelSchema.optional(),
+    targetBps: bpsSchema.optional(),
+    sortOrder: sortSchema.optional(),
+  })
+  .refine((o) => Object.keys(o).length > 0, 'nothing to update');
+
+export const assetCreateSchema = z.object({
+  sleeveId: idSchema,
+  ticker: tickerSchema,
+  label: z.string().trim().max(60).optional().default(''),
+  weightBps: bpsSchema,
+});
+
+export const assetPatchSchema = z
+  .object({
+    ticker: tickerSchema.optional(),
+    label: z.string().trim().max(60).optional(),
+    weightBps: bpsSchema.optional(),
+    sortOrder: sortSchema.optional(),
+  })
+  .refine((o) => Object.keys(o).length > 0, 'nothing to update');
+
+export function buildUpdate(fields: Record<string, unknown>): { setClause: string; values: unknown[] } {
+  const entries = Object.entries(fields);
+  const values = entries.map(([, value]) => value);
+  const setClause = entries.map(([key], index) => `${key} = $${index + 1}`).join(', ');
+  return { setClause, values };
+}
+
 /** Wraps a handler so thrown errors become JSON instead of an HTML stack page. */
 const route =
   (handler: (req: Request, res: Response) => Promise<void>) => (req: Request, res: Response) => {
