@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import type { Account, PortfolioState } from '@shared/types';
 import { api } from '@/lib/api';
 import { parseAmountToCents } from '@/lib/money';
@@ -11,7 +11,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -21,8 +20,8 @@ interface AccountDialogProps {
   /** undefined = create mode, present = edit mode. */
   account?: Account;
   onSaved: (portfolio: PortfolioState) => void;
-  /** The element that opens the dialog (a Button, typically), used with DialogTrigger asChild. */
-  trigger: ReactNode;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }
 
 /** Turns a cent amount into an editable field value, without currency symbols. */
@@ -46,16 +45,13 @@ function parseRoomLimitToCents(raw: string): number | null {
   throw new Error(`Contribution room: ${parsed.error ?? 'not a valid amount'}`);
 }
 
-export function AccountDialog({ account, onSaved, trigger }: AccountDialogProps) {
-  const [open, setOpen] = useState(false);
-
+export function AccountDialog({ account, onSaved, open, onOpenChange }: AccountDialogProps) {
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>{trigger}</DialogTrigger>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         {/* Radix unmounts this while closed, so the form always opens with fresh
             values and a cancelled edit never sticks. */}
-        <AccountForm account={account} onSaved={onSaved} onDone={() => setOpen(false)} />
+        <AccountForm account={account} onSaved={onSaved} onDone={() => onOpenChange(false)} />
       </DialogContent>
     </Dialog>
   );
@@ -65,7 +61,7 @@ function AccountForm({
   account,
   onSaved,
   onDone,
-}: Omit<AccountDialogProps, 'trigger'> & { onDone: () => void }) {
+}: Omit<AccountDialogProps, 'open' | 'onOpenChange'> & { onDone: () => void }) {
   const editing = account !== undefined;
 
   const [label, setLabel] = useState(account?.label ?? '');

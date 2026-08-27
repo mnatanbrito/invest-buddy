@@ -2,6 +2,7 @@ import type { InvestmentRecord, PortfolioState } from '@shared/types';
 import { formatCents } from '@/lib/money';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 interface HistoryPanelProps {
   history: InvestmentRecord[];
@@ -32,37 +33,49 @@ export function HistoryPanel({ history, portfolio, onUndo, undoing }: HistoryPan
         </Button>
       </div>
 
-      <ul className="divide-y rounded-lg border">
-        {history.map((record) => (
-          <li key={record.id} className="p-3 space-y-2">
-            <div className="flex items-baseline justify-between gap-3">
-              <span className="font-medium tabular-nums">{formatCents(record.requestedCents)}</span>
-              <span className="text-xs text-muted-foreground">
-                {new Date(record.createdAt).toLocaleString('en-CA', {
-                  dateStyle: 'medium',
-                  timeStyle: 'short',
-                })}
-              </span>
-            </div>
-
-            <div className="flex flex-wrap gap-1.5">
-              {record.lines
-                .filter((line) => line.amountCents > 0)
-                .map((line) => (
-                  <Badge key={line.assetId} variant="secondary" className="font-normal tabular-nums">
-                    {assetTickers.get(line.assetId) ?? line.assetId} {formatCents(line.amountCents)}
-                  </Badge>
-                ))}
-            </div>
-
-            {record.unallocatedCents > 0 && (
-              <p className="text-xs text-destructive">
-                {formatCents(record.unallocatedCents)} held back as cash — contribution room ran out.
-              </p>
-            )}
-          </li>
-        ))}
-      </ul>
+      <div className="rounded-lg border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>When</TableHead>
+              <TableHead>Amount</TableHead>
+              <TableHead>Assets</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {history.map((record) => (
+              <TableRow key={record.id}>
+                <TableCell className="text-xs text-muted-foreground">
+                  {new Date(record.createdAt).toLocaleString('en-CA', {
+                    dateStyle: 'medium',
+                    timeStyle: 'short',
+                  })}
+                </TableCell>
+                <TableCell className="font-medium tabular-nums">
+                  {formatCents(record.requestedCents)}
+                </TableCell>
+                <TableCell className="whitespace-normal">
+                  <div className="flex flex-wrap gap-1.5">
+                    {record.lines
+                      .filter((line) => line.amountCents > 0)
+                      .map((line) => (
+                        <Badge key={line.assetId} variant="secondary" className="font-normal tabular-nums">
+                          {assetTickers.get(line.assetId) ?? line.assetId} {formatCents(line.amountCents)}
+                        </Badge>
+                      ))}
+                  </div>
+                  {record.unallocatedCents > 0 && (
+                    <p className="mt-1.5 text-xs text-destructive">
+                      {formatCents(record.unallocatedCents)} held back as cash — contribution room ran
+                      out.
+                    </p>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
     </div>
   );
 }

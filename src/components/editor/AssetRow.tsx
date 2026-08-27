@@ -1,11 +1,11 @@
-import { ChevronDownIcon, ChevronUpIcon, PencilIcon } from 'lucide-react';
+import { useState } from 'react';
 import type { Asset, PortfolioState } from '@shared/types';
 import { api } from '@/lib/api';
 import { moveSortOrder } from '@/lib/editor';
 import { formatBps, formatCents } from '@/lib/money';
 import { AssetDialog } from '@/components/editor/AssetDialog';
-import { DeleteEntityButton } from '@/components/editor/DeleteEntityButton';
-import { Button } from '@/components/ui/button';
+import { DeleteEntityDialog } from '@/components/editor/DeleteEntityDialog';
+import { EntityActionsMenu } from '@/components/editor/EntityActionsMenu';
 
 interface AssetRowProps {
   asset: Asset;
@@ -15,6 +15,9 @@ interface AssetRowProps {
 }
 
 export function AssetRow({ asset, siblingAssets, onSaved }: AssetRowProps) {
+  const [editOpen, setEditOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+
   const index = siblingAssets.findIndex((sibling) => sibling.id === asset.id);
   const isFirst = index <= 0;
   const isLast = index === -1 || index === siblingAssets.length - 1;
@@ -49,38 +52,28 @@ export function AssetRow({ asset, siblingAssets, onSaved }: AssetRowProps) {
           {formatCents(asset.holdingCents)}
         </span>
 
-        <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={`Move ${asset.ticker} up`}
-            disabled={isFirst}
-            onClick={() => void move('up')}
-          >
-            <ChevronUpIcon />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={`Move ${asset.ticker} down`}
-            disabled={isLast}
-            onClick={() => void move('down')}
-          >
-            <ChevronDownIcon />
-          </Button>
+        <div>
+          <EntityActionsMenu
+            entityLabel={asset.ticker}
+            isFirst={isFirst}
+            isLast={isLast}
+            onMoveUp={() => void move('up')}
+            onMoveDown={() => void move('down')}
+            onEdit={() => setEditOpen(true)}
+            onDelete={() => setDeleteOpen(true)}
+          />
           <AssetDialog
             sleeveId={asset.sleeveId}
             asset={asset}
             onSaved={onSaved}
-            trigger={
-              <Button variant="ghost" size="icon-sm" aria-label={`Edit ${asset.ticker}`}>
-                <PencilIcon />
-              </Button>
-            }
+            open={editOpen}
+            onOpenChange={setEditOpen}
           />
-          <DeleteEntityButton
+          <DeleteEntityDialog
             entityLabel={asset.ticker}
             onDelete={async () => onSaved(await api.deleteAsset(asset.id))}
+            open={deleteOpen}
+            onOpenChange={setDeleteOpen}
           />
         </div>
       </div>

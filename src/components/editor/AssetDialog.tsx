@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import type { Asset, PortfolioState } from '@shared/types';
 import { api } from '@/lib/api';
 import { bpsFromPercentField, percentFieldFromBps } from '@/lib/editor';
@@ -12,7 +12,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -23,8 +22,8 @@ interface AssetDialogProps {
   /** undefined = create mode, present = edit mode. */
   asset?: Asset;
   onSaved: (portfolio: PortfolioState) => void;
-  /** The element that opens the dialog (a Button, typically), used with DialogTrigger asChild. */
-  trigger: ReactNode;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }
 
 /**
@@ -55,16 +54,18 @@ function parseHoldingToCents(raw: string): number {
   throw new Error(`Current holding: ${parsed.error ?? 'not a valid amount'}`);
 }
 
-export function AssetDialog({ sleeveId, asset, onSaved, trigger }: AssetDialogProps) {
-  const [open, setOpen] = useState(false);
-
+export function AssetDialog({ sleeveId, asset, onSaved, open, onOpenChange }: AssetDialogProps) {
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>{trigger}</DialogTrigger>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         {/* Radix unmounts this while closed, so the form always opens with fresh
             values and a cancelled edit never sticks. */}
-        <AssetForm sleeveId={sleeveId} asset={asset} onSaved={onSaved} onDone={() => setOpen(false)} />
+        <AssetForm
+          sleeveId={sleeveId}
+          asset={asset}
+          onSaved={onSaved}
+          onDone={() => onOpenChange(false)}
+        />
       </DialogContent>
     </Dialog>
   );
@@ -75,7 +76,7 @@ function AssetForm({
   asset,
   onSaved,
   onDone,
-}: Omit<AssetDialogProps, 'trigger'> & { onDone: () => void }) {
+}: Omit<AssetDialogProps, 'open' | 'onOpenChange'> & { onDone: () => void }) {
   const editing = asset !== undefined;
 
   const [ticker, setTicker] = useState(asset?.ticker ?? '');

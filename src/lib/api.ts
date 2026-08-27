@@ -1,7 +1,7 @@
 import type { AllocationPlan, InvestmentRecord, PortfolioState } from '@shared/types';
 
 /** A non-2xx API response, carrying the HTTP status so callers can branch on it
- * (e.g. `DeleteEntityButton` treats 409 — a holdings/history block — differently
+ * (e.g. `DeleteEntityDialog` treats 409 — a holdings/history block — differently
  * from any other failure). */
 export class ApiError extends Error {
   readonly status: number;

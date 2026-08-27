@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import type { PortfolioState, Sleeve } from '@shared/types';
 import { api } from '@/lib/api';
 import { bpsFromPercentField, percentFieldFromBps } from '@/lib/editor';
@@ -11,7 +11,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -22,8 +21,8 @@ interface SleeveDialogProps {
   /** undefined = create mode, present = edit mode. */
   sleeve?: Sleeve;
   onSaved: (portfolio: PortfolioState) => void;
-  /** The element that opens the dialog (a Button, typically), used with DialogTrigger asChild. */
-  trigger: ReactNode;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }
 
 /**
@@ -38,12 +37,9 @@ function parseTargetBps(raw: string): number {
   return parsed.bps;
 }
 
-export function SleeveDialog({ accountId, sleeve, onSaved, trigger }: SleeveDialogProps) {
-  const [open, setOpen] = useState(false);
-
+export function SleeveDialog({ accountId, sleeve, onSaved, open, onOpenChange }: SleeveDialogProps) {
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>{trigger}</DialogTrigger>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         {/* Radix unmounts this while closed, so the form always opens with fresh
             values and a cancelled edit never sticks. */}
@@ -51,7 +47,7 @@ export function SleeveDialog({ accountId, sleeve, onSaved, trigger }: SleeveDial
           accountId={accountId}
           sleeve={sleeve}
           onSaved={onSaved}
-          onDone={() => setOpen(false)}
+          onDone={() => onOpenChange(false)}
         />
       </DialogContent>
     </Dialog>
@@ -63,7 +59,7 @@ function SleeveForm({
   sleeve,
   onSaved,
   onDone,
-}: Omit<SleeveDialogProps, 'trigger'> & { onDone: () => void }) {
+}: Omit<SleeveDialogProps, 'open' | 'onOpenChange'> & { onDone: () => void }) {
   const editing = sleeve !== undefined;
 
   const [label, setLabel] = useState(sleeve?.label ?? '');

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { PortfolioState } from '@shared/types';
 import { MAX_ACCOUNTS, sleeveTargetTotalBps } from '@shared/allocation';
 import { formatBps, formatCents } from '@/lib/money';
@@ -12,6 +13,8 @@ interface PortfolioEditorProps {
 }
 
 export function PortfolioEditor({ portfolio, onSaved }: PortfolioEditorProps) {
+  const [addAccountOpen, setAddAccountOpen] = useState(false);
+
   const targetTotal = sleeveTargetTotalBps(portfolio.sleeves);
   const targetOk = targetTotal === 10_000;
   const accountsMaxed = portfolio.accounts.length >= MAX_ACCOUNTS;
@@ -30,10 +33,10 @@ export function PortfolioEditor({ portfolio, onSaved }: PortfolioEditorProps) {
           </p>
         </div>
         <div className="flex flex-col items-end gap-1">
-          <AccountDialog
-            onSaved={onSaved}
-            trigger={<Button disabled={accountsMaxed}>Add account</Button>}
-          />
+          <Button disabled={accountsMaxed} onClick={() => setAddAccountOpen(true)}>
+            Add account
+          </Button>
+          <AccountDialog onSaved={onSaved} open={addAccountOpen} onOpenChange={setAddAccountOpen} />
           {accountsMaxed && (
             <span className="text-xs text-muted-foreground">Maximum of {MAX_ACCOUNTS} accounts reached</span>
           )}
