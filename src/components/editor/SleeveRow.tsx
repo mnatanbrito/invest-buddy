@@ -1,4 +1,4 @@
-import { ChevronDownIcon, ChevronUpIcon, PencilIcon } from 'lucide-react';
+import { useState } from 'react';
 import type { PortfolioState, Sleeve } from '@shared/types';
 import { MAX_ASSETS_PER_SLEEVE } from '@shared/allocation';
 import { api } from '@/lib/api';
@@ -7,7 +7,8 @@ import { formatBps } from '@/lib/money';
 import { cn } from '@/lib/utils';
 import { AssetDialog } from '@/components/editor/AssetDialog';
 import { AssetRow } from '@/components/editor/AssetRow';
-import { DeleteEntityButton } from '@/components/editor/DeleteEntityButton';
+import { DeleteEntityDialog } from '@/components/editor/DeleteEntityDialog';
+import { EntityActionsMenu } from '@/components/editor/EntityActionsMenu';
 import { SleeveDialog } from '@/components/editor/SleeveDialog';
 import { Button } from '@/components/ui/button';
 
@@ -19,6 +20,10 @@ interface SleeveRowProps {
 }
 
 export function SleeveRow({ sleeve, siblingSleeves, onSaved }: SleeveRowProps) {
+  const [editOpen, setEditOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [addAssetOpen, setAddAssetOpen] = useState(false);
+
   const index = siblingSleeves.findIndex((sibling) => sibling.id === sleeve.id);
   const isFirst = index <= 0;
   const isLast = index === -1 || index === siblingSleeves.length - 1;
@@ -54,38 +59,28 @@ export function SleeveRow({ sleeve, siblingSleeves, onSaved }: SleeveRowProps) {
           </p>
         </div>
 
-        <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={`Move ${sleeve.label} up`}
-            disabled={isFirst}
-            onClick={() => void move('up')}
-          >
-            <ChevronUpIcon />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={`Move ${sleeve.label} down`}
-            disabled={isLast}
-            onClick={() => void move('down')}
-          >
-            <ChevronDownIcon />
-          </Button>
+        <div>
+          <EntityActionsMenu
+            entityLabel={sleeve.label}
+            isFirst={isFirst}
+            isLast={isLast}
+            onMoveUp={() => void move('up')}
+            onMoveDown={() => void move('down')}
+            onEdit={() => setEditOpen(true)}
+            onDelete={() => setDeleteOpen(true)}
+          />
           <SleeveDialog
             accountId={sleeve.accountId}
             sleeve={sleeve}
             onSaved={onSaved}
-            trigger={
-              <Button variant="ghost" size="icon-sm" aria-label={`Edit ${sleeve.label}`}>
-                <PencilIcon />
-              </Button>
-            }
+            open={editOpen}
+            onOpenChange={setEditOpen}
           />
-          <DeleteEntityButton
+          <DeleteEntityDialog
             entityLabel={sleeve.label}
             onDelete={async () => onSaved(await api.deleteSleeve(sleeve.id))}
+            open={deleteOpen}
+            onOpenChange={setDeleteOpen}
           />
         </div>
       </div>
@@ -93,14 +88,19 @@ export function SleeveRow({ sleeve, siblingSleeves, onSaved }: SleeveRowProps) {
       <div className="flex items-center justify-between gap-2">
         <h4 className="text-xs font-medium text-muted-foreground">Assets</h4>
         <div className="flex flex-col items-end gap-1">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={assetsMaxed}
+            onClick={() => setAddAssetOpen(true)}
+          >
+            Add asset
+          </Button>
           <AssetDialog
             sleeveId={sleeve.id}
             onSaved={onSaved}
-            trigger={
-              <Button variant="outline" size="sm" disabled={assetsMaxed}>
-                Add asset
-              </Button>
-            }
+            open={addAssetOpen}
+            onOpenChange={setAddAssetOpen}
           />
           {assetsMaxed && (
             <span className="text-xs text-muted-foreground">

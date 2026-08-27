@@ -1,11 +1,12 @@
-import { ChevronDownIcon, ChevronUpIcon, PencilIcon } from 'lucide-react';
+import { useState } from 'react';
 import type { Account, PortfolioState, Sleeve } from '@shared/types';
 import { MAX_SLEEVES } from '@shared/allocation';
 import { api } from '@/lib/api';
 import { moveSortOrder } from '@/lib/editor';
 import { formatCents } from '@/lib/money';
 import { AccountDialog } from '@/components/editor/AccountDialog';
-import { DeleteEntityButton } from '@/components/editor/DeleteEntityButton';
+import { DeleteEntityDialog } from '@/components/editor/DeleteEntityDialog';
+import { EntityActionsMenu } from '@/components/editor/EntityActionsMenu';
 import { SleeveDialog } from '@/components/editor/SleeveDialog';
 import { SleeveRow } from '@/components/editor/SleeveRow';
 import { Button } from '@/components/ui/button';
@@ -29,6 +30,10 @@ export function AccountCard({
   totalSleeveCount,
   onSaved,
 }: AccountCardProps) {
+  const [editOpen, setEditOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [addSleeveOpen, setAddSleeveOpen] = useState(false);
+
   const index = siblingAccounts.findIndex((sibling) => sibling.id === account.id);
   const isFirst = index <= 0;
   const isLast = index === -1 || index === siblingAccounts.length - 1;
@@ -64,37 +69,22 @@ export function AccountCard({
             {formatCents(account.holdingCents)} held
           </p>
         </div>
-        <CardAction className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={`Move ${account.label} up`}
-            disabled={isFirst}
-            onClick={() => void move('up')}
-          >
-            <ChevronUpIcon />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={`Move ${account.label} down`}
-            disabled={isLast}
-            onClick={() => void move('down')}
-          >
-            <ChevronDownIcon />
-          </Button>
-          <AccountDialog
-            account={account}
-            onSaved={onSaved}
-            trigger={
-              <Button variant="ghost" size="icon-sm" aria-label={`Edit ${account.label}`}>
-                <PencilIcon />
-              </Button>
-            }
+        <CardAction>
+          <EntityActionsMenu
+            entityLabel={account.label}
+            isFirst={isFirst}
+            isLast={isLast}
+            onMoveUp={() => void move('up')}
+            onMoveDown={() => void move('down')}
+            onEdit={() => setEditOpen(true)}
+            onDelete={() => setDeleteOpen(true)}
           />
-          <DeleteEntityButton
+          <AccountDialog account={account} onSaved={onSaved} open={editOpen} onOpenChange={setEditOpen} />
+          <DeleteEntityDialog
             entityLabel={account.label}
             onDelete={async () => onSaved(await api.deleteAccount(account.id))}
+            open={deleteOpen}
+            onOpenChange={setDeleteOpen}
           />
         </CardAction>
       </CardHeader>
@@ -103,14 +93,19 @@ export function AccountCard({
         <div className="flex items-center justify-between gap-2">
           <h3 className="text-sm font-medium">Sleeves</h3>
           <div className="flex flex-col items-end gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={sleevesMaxed}
+              onClick={() => setAddSleeveOpen(true)}
+            >
+              Add sleeve
+            </Button>
             <SleeveDialog
               accountId={account.id}
               onSaved={onSaved}
-              trigger={
-                <Button variant="outline" size="sm" disabled={sleevesMaxed}>
-                  Add sleeve
-                </Button>
-              }
+              open={addSleeveOpen}
+              onOpenChange={setAddSleeveOpen}
             />
             {sleevesMaxed && (
               <span className="text-xs text-muted-foreground">

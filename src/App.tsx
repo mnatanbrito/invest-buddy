@@ -11,7 +11,7 @@ import { PortfolioEditor } from '@/components/editor/PortfolioEditor';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { cn } from '@/lib/utils';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 /** How long the tokens take to reach their boxes; the balances update as they land. */
 const FLIGHT_LANDING_MS = 750;
@@ -147,32 +147,12 @@ export default function App() {
             <div className="text-xs text-muted-foreground">Portfolio value</div>
             <div className="text-xl font-semibold tabular-nums">{formatCents(portfolio.totalCents)}</div>
           </div>
-          <div className="inline-flex rounded-md border p-0.5">
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className={cn(
-                'rounded-sm px-3',
-                currentView === 'plan' && 'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground',
-              )}
-              onClick={() => setView('plan')}
-            >
-              Plan
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className={cn(
-                'rounded-sm px-3',
-                currentView === 'edit' && 'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground',
-              )}
-              onClick={() => setView('edit')}
-            >
-              Edit
-            </Button>
-          </div>
+          <Tabs value={currentView} onValueChange={(value) => setView(value as 'plan' | 'edit')}>
+            <TabsList>
+              <TabsTrigger value="plan">Plan</TabsTrigger>
+              <TabsTrigger value="edit">Edit</TabsTrigger>
+            </TabsList>
+          </Tabs>
         </div>
       </header>
 

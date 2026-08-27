@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { Trash2Icon } from 'lucide-react';
 import { ApiError } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import {
@@ -10,37 +9,36 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from '@/components/ui/dialog';
 
-export interface DeleteEntityButtonProps {
+export interface DeleteEntityDialogProps {
   /** e.g. "RRSP" — the bare entity name; the component composes "Delete {entityLabel}" itself. */
   entityLabel: string;
   /** Caller supplies the actual api.deleteX(id) call. */
   onDelete: () => Promise<void>;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }
 
 /**
- * A small reusable confirm-then-delete trigger shared by account/sleeve/asset
+ * A small reusable confirm-then-delete dialog shared by account/sleeve/asset
  * rows and cards. Mounted-only-while-open via Radix unmounting (same pattern
  * as `AssetDialog`), so a cancelled or failed attempt never leaves stale
  * error state behind the next time the dialog opens.
  */
-export function DeleteEntityButton({ entityLabel, onDelete }: DeleteEntityButtonProps) {
-  const [open, setOpen] = useState(false);
-
+export function DeleteEntityDialog({
+  entityLabel,
+  onDelete,
+  open,
+  onOpenChange,
+}: DeleteEntityDialogProps) {
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant="ghost" size="icon-sm" aria-label={`Delete ${entityLabel}`}>
-          <Trash2Icon />
-        </Button>
-      </DialogTrigger>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-sm">
         <ConfirmDeleteForm
           entityLabel={entityLabel}
           onDelete={onDelete}
-          onDone={() => setOpen(false)}
+          onDone={() => onOpenChange(false)}
         />
       </DialogContent>
     </Dialog>
@@ -51,7 +49,7 @@ function ConfirmDeleteForm({
   entityLabel,
   onDelete,
   onDone,
-}: DeleteEntityButtonProps & { onDone: () => void }) {
+}: Omit<DeleteEntityDialogProps, 'open' | 'onOpenChange'> & { onDone: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
