@@ -21,6 +21,7 @@ export default function App() {
   const [portfolio, setPortfolio] = useState<PortfolioState | null>(null);
   const [history, setHistory] = useState<InvestmentRecord[]>([]);
   const [amount, setAmount] = useState('');
+  const [label, setLabel] = useState('');
   const [flight, setFlight] = useState<DiagramFlight | null>(null);
   const [lastPlan, setLastPlan] = useState<AllocationPlan | null>(null);
   const [busy, setBusy] = useState<'investing' | 'undoing' | null>(null);
@@ -72,10 +73,11 @@ export default function App() {
     setBusy('investing');
     setError(null);
     try {
-      const result = await api.invest(parsed.cents);
+      const result = await api.invest(parsed.cents, label);
       setFlight({ key: Date.now(), plan: result.plan });
       setLastPlan(result.plan);
       setAmount('');
+      setLabel('');
 
       // Let the balances tick over as the tokens arrive, not before they leave.
       window.setTimeout(() => setPortfolio(result.portfolio), FLIGHT_LANDING_MS);
@@ -206,6 +208,20 @@ export default function App() {
                     {parsed.error}
                   </p>
                 )}
+              </div>
+
+              <div className="flex-1 min-w-56 space-y-1.5">
+                <label htmlFor="label" className="text-sm font-medium">
+                  Label (optional)
+                </label>
+                <Input
+                  id="label"
+                  autoComplete="off"
+                  placeholder="Year-end bonus"
+                  maxLength={60}
+                  value={label}
+                  onChange={(event) => setLabel(event.target.value)}
+                />
               </div>
 
               <Button type="submit" size="lg" className="mt-6.5" disabled={!canInvest}>

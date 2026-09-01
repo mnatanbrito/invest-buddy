@@ -47,10 +47,10 @@ export const api = {
       body: JSON.stringify({ amountCents }),
     }),
 
-  invest: (amountCents: number) =>
+  invest: (amountCents: number, label?: string) =>
     request<InvestResult>('/api/invest', {
       method: 'POST',
-      body: JSON.stringify({ amountCents }),
+      body: JSON.stringify({ amountCents, label }),
     }),
 
   undo: () => request<PortfolioState>('/api/undo', { method: 'POST' }),

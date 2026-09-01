@@ -37,6 +37,7 @@ export function HistoryPanel({ history, portfolio, onUndo, undoing }: HistoryPan
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead>Label</TableHead>
               <TableHead>When</TableHead>
               <TableHead>Amount</TableHead>
               <TableHead>Assets</TableHead>
@@ -45,6 +46,9 @@ export function HistoryPanel({ history, portfolio, onUndo, undoing }: HistoryPan
           <TableBody>
             {history.map((record) => (
               <TableRow key={record.id}>
+                <TableCell className="text-sm">
+                  {record.label || <span className="text-muted-foreground">—</span>}
+                </TableCell>
                 <TableCell className="text-xs text-muted-foreground">
                   {new Date(record.createdAt).toLocaleString('en-CA', {
                     dateStyle: 'medium',

@@ -84,6 +84,7 @@ export interface AllocationPlan {
 
 export interface InvestmentRecord {
   id: number;
+  label: string;
   requestedCents: number;
   allocatedCents: number;
   unallocatedCents: number;
