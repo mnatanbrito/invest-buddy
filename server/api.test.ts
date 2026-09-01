@@ -116,6 +116,46 @@ describe('POST /api/invest', () => {
   });
 });
 
+describe('POST /api/invest label', () => {
+  it('persists an optional label and returns it from history', async () => {
+    await request(app)
+      .post('/api/invest')
+      .send({ amountCents: 1_000_000, label: 'Year-end bonus' })
+      .expect(200);
+
+    const { body } = await request(app).get('/api/history').expect(200);
+    const history = body as InvestmentRecord[];
+    expect(history[0].label).toBe('Year-end bonus');
+  });
+
+  it('defaults to an empty label when none is given', async () => {
+    await invest(1_000_000).expect(200);
+
+    const { body } = await request(app).get('/api/history').expect(200);
+    const history = body as InvestmentRecord[];
+    expect(history[0].label).toBe('');
+  });
+
+  it('trims whitespace around the label', async () => {
+    await request(app)
+      .post('/api/invest')
+      .send({ amountCents: 1_000_000, label: '  RESP top-up  ' })
+      .expect(200);
+
+    const { body } = await request(app).get('/api/history').expect(200);
+    const history = body as InvestmentRecord[];
+    expect(history[0].label).toBe('RESP top-up');
+  });
+
+  it('rejects a label over 60 characters', async () => {
+    const { body } = await request(app)
+      .post('/api/invest')
+      .send({ amountCents: 1_000_000, label: 'x'.repeat(61) })
+      .expect(400);
+    expect(body.error).toBe('label is too long');
+  });
+});
+
 describe('contribution room capping', () => {
   it('writes only what fits and reports the rest as unallocated cash', async () => {
     const { body } = await invest(10_000_000).expect(200);

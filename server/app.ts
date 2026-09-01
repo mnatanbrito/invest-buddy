@@ -41,6 +41,7 @@ const depositSchema = z.object({
     .number()
     .int('amount must be a whole number of cents')
     .positive('enter an amount greater than zero'),
+  label: z.string().trim().max(60, 'label is too long').optional().default(''),
 });
 
 const holdingsSchema = z.object({
@@ -508,7 +509,7 @@ export function createApp(pool: Pool): Express {
   app.post(
     '/api/invest',
     route(async (req, res) => {
-      const { amountCents } = depositSchema.parse(req.body);
+      const { amountCents, label } = depositSchema.parse(req.body);
 
       const result = await withTransaction(pool, async (client) => {
         await client.query('LOCK TABLE assets IN SHARE ROW EXCLUSIVE MODE');
@@ -519,9 +520,9 @@ export function createApp(pool: Pool): Express {
         const plan = planDeposit(toRebalanceUnits(portfolio), portfolio.accounts, amountCents);
 
         const { rows } = await client.query<{ id: number; created_at: Date }>(
-          `INSERT INTO investments (requested_cents, allocated_cents, unallocated_cents)
-           VALUES ($1, $2, $3) RETURNING id, created_at`,
-          [plan.requestedCents, plan.allocatedCents, plan.unallocatedCents],
+          `INSERT INTO investments (label, requested_cents, allocated_cents, unallocated_cents)
+           VALUES ($1, $2, $3, $4) RETURNING id, created_at`,
+          [label, plan.requestedCents, plan.allocatedCents, plan.unallocatedCents],
         );
         const investmentId = rows[0].id;
 
@@ -603,6 +604,7 @@ export function createApp(pool: Pool): Express {
     route(async (_req, res) => {
       const { rows } = await pool.query<InvestmentRecord>(
         `SELECT i.id,
+                i.label             AS "label",
                 i.requested_cents   AS "requestedCents",
                 i.allocated_cents   AS "allocatedCents",
                 i.unallocated_cents AS "unallocatedCents",

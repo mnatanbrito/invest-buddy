@@ -53,6 +53,9 @@ CREATE INDEX assets_sleeve_idx ON assets (sleeve_id);
 
 CREATE TABLE investments (
   id                SERIAL PRIMARY KEY,
+  -- Optional user-supplied note to help pick this deposit out of history later
+  -- (e.g. "Year-end bonus"). Empty string means none was given.
+  label             TEXT        NOT NULL DEFAULT '',
   -- What the user asked to invest.
   requested_cents   BIGINT      NOT NULL,
   -- What actually landed in assets after contribution-room capping.
