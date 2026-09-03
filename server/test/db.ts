@@ -1,12 +1,10 @@
-import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { Pool } from 'pg';
-import { DEFAULT_CONNECTION_STRING, createPool, withTransaction } from '../db/pool';
+import { migrate } from 'drizzle-orm/node-postgres/migrator';
+import { DEFAULT_CONNECTION_STRING, createDb, createPool, type Database } from '../db/pool';
 import { EXAMPLE_PORTFOLIO, insertPortfolio } from '../presets/example';
 
-const SQL_DIR = path.resolve(import.meta.dirname, '../db');
-
-const schemaSql = readFileSync(path.join(SQL_DIR, 'schema.sql'), 'utf8');
+const MIGRATIONS_DIR = path.resolve(import.meta.dirname, '../db/migrations');
 
 const baseUrl = () => process.env.DATABASE_URL ?? DEFAULT_CONNECTION_STRING;
 
@@ -35,15 +33,21 @@ let counter = 0;
 
 export interface TestDatabase {
   pool: Pool;
+  /** Drizzle instance bound to the same throwaway pool. */
+  orm: Database;
   name: string;
-  /** Truncate the ledger and restore seeded values, without paying to recreate the database. */
+  /**
+   * Truncates all five tables and resets their identity sequences — nothing more,
+   * and cheaper than recreating the database. Callers that need starting data
+   * invoke `loadExample` separately afterwards.
+   */
   reset: () => Promise<void>;
   drop: () => Promise<void>;
 }
 
 /**
- * Builds a throwaway database seeded from the real schema.sql and seed.sql, so the
- * tests exercise the same DDL the app ships rather than a hand-maintained copy.
+ * Builds a throwaway database and brings it up to date by running the generated
+ * Drizzle migrations, so the tests exercise the same migration chain the app ships.
  *
  * Each call gets its own database, keyed by pid and a counter, so parallel test
  * files never share state.
@@ -58,14 +62,20 @@ export async function createTestDatabase(label: string): Promise<TestDatabase> {
   });
 
   const pool = createPool(urlForDatabase(name));
-  await pool.query(schemaSql);
+  const orm = createDb(pool);
+  await migrate(orm, { migrationsFolder: MIGRATIONS_DIR });
 
   return {
     pool,
+    orm,
     name,
     reset: async () => {
-      // schema.sql drops and recreates every table, so this also clears the ledger.
-      await pool.query(schemaSql);
+      // TRUNCATE ... RESTART IDENTITY resets the SERIAL sequences too, so
+      // investment ids start at 1 in every test the same way the old
+      // drop-and-recreate did.
+      await pool.query(
+        'TRUNCATE accounts, sleeves, assets, investments, investment_lines RESTART IDENTITY CASCADE',
+      );
     },
     drop: async () => {
       await pool.end();
@@ -75,6 +85,6 @@ export async function createTestDatabase(label: string): Promise<TestDatabase> {
 }
 
 /** Loads the example account/sleeve/asset tree into an (assumed empty) test database. */
-export async function loadExample(pool: Pool): Promise<void> {
-  await withTransaction(pool, (client) => insertPortfolio(client, EXAMPLE_PORTFOLIO));
+export async function loadExample(orm: Database): Promise<void> {
+  await orm.transaction((tx) => insertPortfolio(tx, EXAMPLE_PORTFOLIO));
 }

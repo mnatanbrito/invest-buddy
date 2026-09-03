@@ -1,69 +1,8 @@
-import type { PoolClient } from 'pg';
+import { eq, sql } from 'drizzle-orm';
+import type { Executor } from './db/pool';
+import { accounts, assets, investmentLines, sleeves } from './db/schema';
 import { actualBps, effectiveTargetBps } from '../shared/rebalance';
 import type { Account, Asset, PortfolioState, Sleeve } from '../shared/types';
-
-interface AccountRow {
-  id: string;
-  label: string;
-  note: string;
-  room_limit: number | null;
-  sort_order: number;
-  room_used: number;
-}
-
-interface SleeveRow {
-  id: string;
-  account_id: string;
-  label: string;
-  target_bps: number;
-  sort_order: number;
-}
-
-interface AssetRow {
-  id: string;
-  sleeve_id: string;
-  ticker: string;
-  label: string;
-  weight_bps: number;
-  holding_cents: number;
-  sort_order: number;
-}
-
-/**
- * Contribution room used is derived from the investment ledger rather than stored,
- * so undoing an investment gives the room back with no extra bookkeeping. Joined
- * through assets -> sleeves since holdings live on assets now.
- */
-const ACCOUNTS_QUERY = `
-  SELECT a.id, a.label, a.note, a.room_limit, a.sort_order,
-         COALESCE(used.total, 0)::BIGINT AS room_used
-    FROM accounts a
-    LEFT JOIN (
-      SELECT s.account_id, SUM(l.amount_cents)::BIGINT AS total
-        FROM investment_lines l
-        JOIN assets ast ON ast.id = l.asset_id
-        JOIN sleeves s ON s.id = ast.sleeve_id
-       GROUP BY s.account_id
-    ) used ON used.account_id = a.id
-   ORDER BY a.sort_order, a.id
-`;
-
-/** Sleeves ordered through their parent account first, so the flat list stays grouped by account. */
-const SLEEVES_QUERY = `
-  SELECT s.id, s.account_id, s.label, s.target_bps, s.sort_order
-    FROM sleeves s
-    JOIN accounts a ON a.id = s.account_id
-   ORDER BY a.sort_order, a.id, s.sort_order, s.id
-`;
-
-/** Assets ordered through their parent sleeve and account, so the flat list stays grouped. */
-const ASSETS_QUERY = `
-  SELECT ast.id, ast.sleeve_id, ast.ticker, ast.label, ast.weight_bps, ast.holding_cents, ast.sort_order
-    FROM assets ast
-    JOIN sleeves s ON s.id = ast.sleeve_id
-    JOIN accounts a ON a.id = s.account_id
-   ORDER BY a.sort_order, a.id, s.sort_order, s.id, ast.sort_order, ast.id
-`;
 
 export type EntityKind = 'account' | 'sleeve' | 'asset';
 
@@ -72,135 +11,201 @@ export interface DeleteBlock {
   hasHistory: boolean;
 }
 
-const DELETE_BLOCKERS_SCOPE: Record<EntityKind, string> = {
-  account: `EXISTS (SELECT 1 FROM sleeves s WHERE s.account_id = $1 AND s.id = ast.sleeve_id)`,
-  sleeve: `ast.sleeve_id = $1`,
-  asset: `ast.id = $1`,
-};
-
 /** What would stop `id` (of kind `kind`) from being deleted. */
 export async function deleteBlockers(
-  client: PoolClient,
+  exec: Executor,
   kind: EntityKind,
   id: string,
 ): Promise<DeleteBlock> {
-  const scope = DELETE_BLOCKERS_SCOPE[kind];
-  const { rows } = await client.query<{ holding_cents: number; has_history: boolean }>(
-    `SELECT
-       COALESCE((SELECT SUM(ast.holding_cents) FROM assets ast WHERE ${scope}), 0)::BIGINT AS holding_cents,
-       EXISTS (
-         SELECT 1 FROM investment_lines l JOIN assets ast ON ast.id = l.asset_id WHERE ${scope}
-       ) AS has_history`,
-    [id],
-  );
-  return { holdingCents: rows[0].holding_cents, hasHistory: rows[0].has_history };
+  const scope =
+    kind === 'asset'
+      ? eq(assets.id, id)
+      : kind === 'sleeve'
+        ? eq(assets.sleeveId, id)
+        : sql`${assets.sleeveId} IN (SELECT ${sleeves.id} FROM ${sleeves} WHERE ${sleeves.accountId} = ${id})`;
+
+  const [holding] = await exec
+    .select({ cents: sql<number>`coalesce(sum(${assets.holdingCents}), 0)::bigint` })
+    .from(assets)
+    .where(scope);
+
+  const history = await exec
+    .select({ one: sql`1` })
+    .from(investmentLines)
+    .innerJoin(assets, eq(assets.id, investmentLines.assetId))
+    .where(scope)
+    .limit(1);
+
+  return { holdingCents: holding.cents, hasHistory: history.length > 0 };
 }
 
-const SORT_ORDER_TABLES = {
-  accounts: { parentColumn: null },
-  sleeves: { parentColumn: 'account_id' },
-  assets: { parentColumn: 'sleeve_id' },
-} as const;
-
-export type SortableTable = keyof typeof SORT_ORDER_TABLES;
+const SORT_TABLES = { accounts, sleeves, assets } as const;
+export type SortableTable = keyof typeof SORT_TABLES;
 
 /** Next sort_order for a new row: one past the current max within its parent scope. */
 export async function nextSortOrder(
-  client: PoolClient,
+  exec: Executor,
   table: SortableTable,
   parentId: string | null,
 ): Promise<number> {
-  const { parentColumn } = SORT_ORDER_TABLES[table];
-  const where = parentColumn && parentId !== null ? `WHERE ${parentColumn} = $1` : '';
-  const params = parentColumn && parentId !== null ? [parentId] : [];
-  const { rows } = await client.query<{ next: number }>(
-    `SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM ${table} ${where}`,
-    params,
-  );
-  return rows[0].next;
+  const t = SORT_TABLES[table];
+  const where =
+    table === 'sleeves' && parentId !== null
+      ? eq(sleeves.accountId, parentId)
+      : table === 'assets' && parentId !== null
+        ? eq(assets.sleeveId, parentId)
+        : undefined;
+  const [row] = await exec
+    .select({ next: sql<number>`coalesce(max(${t.sortOrder}), 0) + 1` })
+    .from(t)
+    .where(where);
+  return row.next;
 }
 
 /** Update an entity's sort_order to a new position. */
 export async function resequence(
-  client: PoolClient,
+  exec: Executor,
   table: SortableTable,
   id: string,
   sortOrder: number,
 ): Promise<void> {
-  await client.query(`UPDATE ${table} SET sort_order = $1 WHERE id = $2`, [sortOrder, id]);
+  const t = SORT_TABLES[table];
+  await exec.update(t).set({ sortOrder }).where(eq(t.id, id));
 }
 
-export async function readPortfolio(client: PoolClient): Promise<PortfolioState> {
-  // Sequential, not Promise.all: concurrent queries on a single pg PoolClient are
-  // deprecated (removed in pg@9), and a single Postgres connection serializes them
-  // anyway, so there's no concurrency to gain.
-  const accountsResult = await client.query<AccountRow>(ACCOUNTS_QUERY);
-  const sleevesResult = await client.query<SleeveRow>(SLEEVES_QUERY);
-  const assetsResult = await client.query<AssetRow>(ASSETS_QUERY);
+export async function readPortfolio(exec: Executor): Promise<PortfolioState> {
+  // Contribution room used is derived from the ledger rather than stored, so
+  // undoing an investment gives the room back with no extra bookkeeping.
+  const usedByAccount = exec
+    .select({
+      accountId: sleeves.accountId,
+      total: sql<number>`sum(${investmentLines.amountCents})::bigint`.as('total'),
+    })
+    .from(investmentLines)
+    .innerJoin(assets, eq(assets.id, investmentLines.assetId))
+    .innerJoin(sleeves, eq(sleeves.id, assets.sleeveId))
+    .groupBy(sleeves.accountId)
+    .as('used');
 
-  const totalCents = assetsResult.rows.reduce((sum, row) => sum + row.holding_cents, 0);
+  // Sequential, not Promise.all. When `exec` is a transaction the three reads
+  // share one connection and one snapshot, so parallelism buys nothing. When
+  // `/api/portfolio` and `/api/preview` pass the pool-bound `db` instead, the
+  // reads may land on different pooled connections and see independent READ
+  // COMMITTED snapshots — not a regression: the pre-Drizzle code called
+  // `pool.connect()` without a `BEGIN`, so every statement already ran in its
+  // own snapshot the same way.
+  const accountRows = await exec
+    .select({
+      id: accounts.id,
+      label: accounts.label,
+      note: accounts.note,
+      roomLimit: accounts.roomLimit,
+      sortOrder: accounts.sortOrder,
+      roomUsed: sql<number>`coalesce(${usedByAccount.total}, 0)::bigint`,
+    })
+    .from(accounts)
+    .leftJoin(usedByAccount, eq(usedByAccount.accountId, accounts.id))
+    .orderBy(accounts.sortOrder, accounts.id);
+
+  const sleeveRows = await exec
+    .select({
+      id: sleeves.id,
+      accountId: sleeves.accountId,
+      label: sleeves.label,
+      targetBps: sleeves.targetBps,
+      sortOrder: sleeves.sortOrder,
+    })
+    .from(sleeves)
+    .innerJoin(accounts, eq(accounts.id, sleeves.accountId))
+    .orderBy(accounts.sortOrder, accounts.id, sleeves.sortOrder, sleeves.id);
+
+  const assetRows = await exec
+    .select({
+      id: assets.id,
+      sleeveId: assets.sleeveId,
+      ticker: assets.ticker,
+      label: assets.label,
+      weightBps: assets.weightBps,
+      holdingCents: assets.holdingCents,
+      sortOrder: assets.sortOrder,
+    })
+    .from(assets)
+    .innerJoin(sleeves, eq(sleeves.id, assets.sleeveId))
+    .innerJoin(accounts, eq(accounts.id, sleeves.accountId))
+    .orderBy(
+      accounts.sortOrder,
+      accounts.id,
+      sleeves.sortOrder,
+      sleeves.id,
+      assets.sortOrder,
+      assets.id,
+    );
+
+  type AssetRow = (typeof assetRows)[number];
+  const totalCents = assetRows.reduce((sum, row) => sum + row.holdingCents, 0);
 
   const assetsBySleeve = new Map<string, AssetRow[]>();
-  for (const row of assetsResult.rows) {
-    const list = assetsBySleeve.get(row.sleeve_id) ?? [];
+  for (const row of assetRows) {
+    const list = assetsBySleeve.get(row.sleeveId) ?? [];
     list.push(row);
-    assetsBySleeve.set(row.sleeve_id, list);
+    assetsBySleeve.set(row.sleeveId, list);
   }
 
-  const sleeves: Sleeve[] = sleevesResult.rows.map((sleeveRow) => {
-    const assetRows = assetsBySleeve.get(sleeveRow.id) ?? [];
-    const assets: Asset[] = assetRows.map((row) => {
-      const actual = actualBps(row.holding_cents, totalCents);
-      const effectiveTarget = effectiveTargetBps(sleeveRow.target_bps, row.weight_bps);
+  const sleevesOut: Sleeve[] = sleeveRows.map((sleeveRow) => {
+    const rows = assetsBySleeve.get(sleeveRow.id) ?? [];
+    const assetsOut: Asset[] = rows.map((row) => {
+      const actual = actualBps(row.holdingCents, totalCents);
+      const effectiveTarget = effectiveTargetBps(sleeveRow.targetBps, row.weightBps);
       return {
         id: row.id,
-        sleeveId: row.sleeve_id,
+        sleeveId: row.sleeveId,
         ticker: row.ticker,
         label: row.label,
-        weightBps: row.weight_bps,
-        holdingCents: row.holding_cents,
+        weightBps: row.weightBps,
+        holdingCents: row.holdingCents,
         effectiveTargetBps: effectiveTarget,
         actualBps: actual,
         driftBps: totalCents > 0 ? actual - effectiveTarget : 0,
-        sortOrder: row.sort_order,
+        sortOrder: row.sortOrder,
       };
     });
 
-    const holdingCents = assets.reduce((sum, asset) => sum + asset.holdingCents, 0);
+    const holdingCents = assetsOut.reduce((sum, a) => sum + a.holdingCents, 0);
     const actual = actualBps(holdingCents, totalCents);
 
     return {
       id: sleeveRow.id,
-      accountId: sleeveRow.account_id,
+      accountId: sleeveRow.accountId,
       label: sleeveRow.label,
-      targetBps: sleeveRow.target_bps,
-      sortOrder: sleeveRow.sort_order,
-      assets,
+      targetBps: sleeveRow.targetBps,
+      sortOrder: sleeveRow.sortOrder,
+      assets: assetsOut,
       holdingCents,
       actualBps: actual,
-      driftBps: totalCents > 0 ? actual - sleeveRow.target_bps : 0,
-      assetWeightTotalBps: assets.reduce((sum, asset) => sum + asset.weightBps, 0),
+      driftBps: totalCents > 0 ? actual - sleeveRow.targetBps : 0,
+      assetWeightTotalBps: assetsOut.reduce((sum, a) => sum + a.weightBps, 0),
     };
   });
 
   const holdingsByAccount = new Map<string, number>();
-  for (const sleeve of sleeves) {
+  for (const sleeve of sleevesOut) {
     holdingsByAccount.set(
       sleeve.accountId,
       (holdingsByAccount.get(sleeve.accountId) ?? 0) + sleeve.holdingCents,
     );
   }
 
-  const accounts: Account[] = accountsResult.rows.map((row) => ({
+  const accountsOut: Account[] = accountRows.map((row) => ({
     id: row.id,
     label: row.label,
     note: row.note,
-    roomLimitCents: row.room_limit,
-    roomUsedCents: row.room_used,
-    roomRemainingCents: row.room_limit === null ? null : Math.max(0, row.room_limit - row.room_used),
+    roomLimitCents: row.roomLimit,
+    roomUsedCents: row.roomUsed,
+    roomRemainingCents:
+      row.roomLimit === null ? null : Math.max(0, row.roomLimit - row.roomUsed),
     holdingCents: holdingsByAccount.get(row.id) ?? 0,
-    sortOrder: row.sort_order,
+    sortOrder: row.sortOrder,
   }));
 
-  return { accounts, sleeves, totalCents };
+  return { accounts: accountsOut, sleeves: sleevesOut, totalCents };
 }

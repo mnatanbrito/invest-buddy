@@ -1,0 +1,438 @@
+{
+  "id": "f3a5fd78-d25c-445a-a74f-3e5abe1b6ed6",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.accounts": {
+      "name": "accounts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "room_limit": {
+          "name": "room_limit",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "account_label_present": {
+          "name": "account_label_present",
+          "value": "btrim(\"accounts\".\"label\") <> ''"
+        },
+        "room_limit_non_negative": {
+          "name": "room_limit_non_negative",
+          "value": "\"accounts\".\"room_limit\" IS NULL OR \"accounts\".\"room_limit\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.assets": {
+      "name": "assets",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "sleeve_id": {
+          "name": "sleeve_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ticker": {
+          "name": "ticker",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "weight_bps": {
+          "name": "weight_bps",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "holding_cents": {
+          "name": "holding_cents",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "assets_sleeve_idx": {
+          "name": "assets_sleeve_idx",
+          "columns": [
+            {
+              "expression": "sleeve_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "assets_sleeve_id_sleeves_id_fk": {
+          "name": "assets_sleeve_id_sleeves_id_fk",
+          "tableFrom": "assets",
+          "tableTo": "sleeves",
+          "columnsFrom": [
+            "sleeve_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "asset_ticker_unique_in_sleeve": {
+          "name": "asset_ticker_unique_in_sleeve",
+          "nullsNotDistinct": false,
+          "columns": [
+            "sleeve_id",
+            "ticker"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "asset_ticker_present": {
+          "name": "asset_ticker_present",
+          "value": "btrim(\"assets\".\"ticker\") <> ''"
+        },
+        "weight_bps_valid": {
+          "name": "weight_bps_valid",
+          "value": "\"assets\".\"weight_bps\" BETWEEN 0 AND 10000"
+        },
+        "holding_non_negative": {
+          "name": "holding_non_negative",
+          "value": "\"assets\".\"holding_cents\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.investment_lines": {
+      "name": "investment_lines",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "investment_id": {
+          "name": "investment_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "asset_id": {
+          "name": "asset_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "intended_cents": {
+          "name": "intended_cents",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount_cents": {
+          "name": "amount_cents",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "investment_lines_investment_idx": {
+          "name": "investment_lines_investment_idx",
+          "columns": [
+            {
+              "expression": "investment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "investment_lines_asset_idx": {
+          "name": "investment_lines_asset_idx",
+          "columns": [
+            {
+              "expression": "asset_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "investment_lines_investment_id_investments_id_fk": {
+          "name": "investment_lines_investment_id_investments_id_fk",
+          "tableFrom": "investment_lines",
+          "tableTo": "investments",
+          "columnsFrom": [
+            "investment_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "investment_lines_asset_id_assets_id_fk": {
+          "name": "investment_lines_asset_id_assets_id_fk",
+          "tableFrom": "investment_lines",
+          "tableTo": "assets",
+          "columnsFrom": [
+            "asset_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "investment_lines_investment_id_asset_id_key": {
+          "name": "investment_lines_investment_id_asset_id_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "investment_id",
+            "asset_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "amounts_non_negative": {
+          "name": "amounts_non_negative",
+          "value": "\"investment_lines\".\"amount_cents\" >= 0 AND \"investment_lines\".\"intended_cents\" >= \"investment_lines\".\"amount_cents\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.investments": {
+      "name": "investments",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "requested_cents": {
+          "name": "requested_cents",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "allocated_cents": {
+          "name": "allocated_cents",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "unallocated_cents": {
+          "name": "unallocated_cents",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "requested_positive": {
+          "name": "requested_positive",
+          "value": "\"investments\".\"requested_cents\" > 0"
+        },
+        "allocation_balances": {
+          "name": "allocation_balances",
+          "value": "\"investments\".\"allocated_cents\" + \"investments\".\"unallocated_cents\" = \"investments\".\"requested_cents\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.sleeves": {
+      "name": "sleeves",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "target_bps": {
+          "name": "target_bps",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "sleeves_account_idx": {
+          "name": "sleeves_account_idx",
+          "columns": [
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "sleeves_account_id_accounts_id_fk": {
+          "name": "sleeves_account_id_accounts_id_fk",
+          "tableFrom": "sleeves",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "sleeve_label_present": {
+          "name": "sleeve_label_present",
+          "value": "btrim(\"sleeves\".\"label\") <> ''"
+        },
+        "target_bps_valid": {
+          "name": "target_bps_valid",
+          "value": "\"sleeves\".\"target_bps\" BETWEEN 0 AND 10000"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

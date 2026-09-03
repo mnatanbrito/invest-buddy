@@ -10,7 +10,7 @@ let app: Express;
 
 beforeAll(async () => {
   db = await createTestDatabase('api');
-  app = createApp(db.pool);
+  app = createApp(db.orm);
 });
 
 afterAll(async () => {
@@ -19,7 +19,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await db.reset();
-  await loadExample(db.pool);
+  await loadExample(db.orm);
 });
 
 const invest = (amountCents: unknown) =>
@@ -317,6 +317,12 @@ describe('GET /api/history', () => {
       amountCents: expect.any(Number),
       intendedCents: expect.any(Number),
     });
+    // createdAt goes over the wire as an ISO-8601 UTC string, not a raw
+    // Postgres timestamp — parseable back to a finite instant.
+    expect(history[0].createdAt).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
+    );
+    expect(Number.isFinite(Date.parse(history[0].createdAt))).toBe(true);
   });
 
   it('returns an empty array when nothing has been recorded', async () => {

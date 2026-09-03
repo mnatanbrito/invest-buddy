@@ -1,4 +1,5 @@
-import type { PoolClient } from 'pg';
+import type { Executor } from '../db/pool';
+import { accounts, assets, sleeves } from '../db/schema';
 
 export interface PresetAsset {
   id: string;
@@ -81,28 +82,37 @@ export const EXAMPLE_PORTFOLIO: PresetAccount[] = [
 ];
 
 /** Assumes an empty database — callers must enforce that before inserting. */
-export async function insertPortfolio(client: PoolClient, accounts: PresetAccount[]): Promise<void> {
+export async function insertPortfolio(exec: Executor, accountsInput: PresetAccount[]): Promise<void> {
   let accountSortOrder = 1;
-  for (const account of accounts) {
-    await client.query(
-      `INSERT INTO accounts (id, label, note, room_limit, sort_order) VALUES ($1, $2, $3, $4, $5)`,
-      [account.id, account.label, account.note, account.roomLimitCents, accountSortOrder++],
-    );
+  for (const account of accountsInput) {
+    await exec.insert(accounts).values({
+      id: account.id,
+      label: account.label,
+      note: account.note,
+      roomLimit: account.roomLimitCents,
+      sortOrder: accountSortOrder++,
+    });
 
     let sleeveSortOrder = 1;
     for (const sleeve of account.sleeves) {
-      await client.query(
-        `INSERT INTO sleeves (id, account_id, label, target_bps, sort_order) VALUES ($1, $2, $3, $4, $5)`,
-        [sleeve.id, account.id, sleeve.label, sleeve.targetBps, sleeveSortOrder++],
-      );
+      await exec.insert(sleeves).values({
+        id: sleeve.id,
+        accountId: account.id,
+        label: sleeve.label,
+        targetBps: sleeve.targetBps,
+        sortOrder: sleeveSortOrder++,
+      });
 
       let assetSortOrder = 1;
       for (const asset of sleeve.assets) {
-        await client.query(
-          `INSERT INTO assets (id, sleeve_id, ticker, label, weight_bps, sort_order)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
-          [asset.id, sleeve.id, asset.ticker, asset.label, asset.weightBps, assetSortOrder++],
-        );
+        await exec.insert(assets).values({
+          id: asset.id,
+          sleeveId: sleeve.id,
+          ticker: asset.ticker,
+          label: asset.label,
+          weightBps: asset.weightBps,
+          sortOrder: assetSortOrder++,
+        });
       }
     }
   }
