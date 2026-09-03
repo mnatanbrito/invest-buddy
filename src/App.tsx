@@ -350,7 +350,6 @@ export default function App() {
                 .filter(
                   (line) =>
                     line.blockedCents > 0 &&
-                    line.redirectedCents === 0 &&
                     preview.prioritizedAccountIds.includes(line.accountId),
                 )
                 .map((line) => {
@@ -359,11 +358,22 @@ export default function App() {
                     .find((a) => a.id === line.assetId)?.ticker;
                   const accountLabel =
                     portfolio.accounts.find((a) => a.id === line.accountId)?.label ?? line.accountId;
+                  const partlyRedirected = line.redirectedCents < 0;
                   return (
                     <p key={line.assetId} className="text-sm text-destructive">
-                      {formatCents(line.blockedCents)} from {accountLabel} couldn&apos;t be
-                      redirected — no other sleeve holds {ticker ?? 'that ticker'} — and stays as
-                      cash.
+                      {partlyRedirected ? (
+                        <>
+                          {formatCents(line.blockedCents)} from {accountLabel} couldn&apos;t all be
+                          redirected — the other {ticker ?? 'same-ticker'} sleeves are already at
+                          their contribution room — so {formatCents(line.blockedCents)} stays as cash.
+                        </>
+                      ) : (
+                        <>
+                          {formatCents(line.blockedCents)} from {accountLabel} couldn&apos;t be
+                          redirected — no other sleeve holds {ticker ?? 'that ticker'} — and stays as
+                          cash.
+                        </>
+                      )}
                     </p>
                   );
                 })}
