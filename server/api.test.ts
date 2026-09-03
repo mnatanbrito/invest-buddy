@@ -926,6 +926,113 @@ describe('POST /api/preview', () => {
     const { body } = await request(app).post('/api/preview').send({ amountCents: 1_000_000 }).expect(400);
     expect(body.error).toMatch(/not 100%/);
   });
+
+  it('echoes prioritizedAccountIds and caps the prioritized account at its room', async () => {
+    // TFSA target is 35%; $200k would send $70k there, past its $25k example room.
+    const { body } = await request(app)
+      .post('/api/preview')
+      .send({ amountCents: 20_000_000, prioritizedAccountIds: ['tfsa'] })
+      .expect(200);
+
+    const plan = body as AllocationPlan;
+    expect(plan.prioritizedAccountIds).toEqual(['tfsa']);
+    expect(plan.cappedAccountIds).toContain('tfsa');
+    const tfsaUsed = plan.lines
+      .filter((l) => ['cad_equity_vcn', 'intl_equity_xef'].includes(l.assetId))
+      .reduce((s, l) => s + l.amountCents, 0);
+    expect(tfsaUsed).toBe(2_500_000); // the example TFSA room
+    // The example portfolio has no shared tickers, so the overflow becomes cash.
+    expect(plan.redirectedCents).toBe(0);
+    expect(plan.unallocatedCents).toBeGreaterThan(0);
+    expect(plan.allocatedCents + plan.unallocatedCents).toBe(20_000_000);
+  });
+
+  it('rejects an unknown account id in prioritizedAccountIds', async () => {
+    const { body } = await request(app)
+      .post('/api/preview')
+      .send({ amountCents: 1_000_000, prioritizedAccountIds: ['nope'] })
+      .expect(400);
+    expect(body.error).toBe('unknown account in prioritizedAccountIds: nope');
+  });
+
+  it('is unchanged when prioritizedAccountIds is omitted', async () => {
+    const withField = await request(app)
+      .post('/api/preview')
+      .send({ amountCents: 1_000_000, prioritizedAccountIds: [] })
+      .expect(200);
+    const without = await request(app)
+      .post('/api/preview')
+      .send({ amountCents: 1_000_000 })
+      .expect(200);
+    expect(assetAmounts(withField.body as AllocationPlan)).toEqual(
+      assetAmounts(without.body as AllocationPlan),
+    );
+  });
+});
+
+describe('POST /api/invest with prioritized accounts', () => {
+  /** RRSP (XEQT 45% + ZAG 10%) + TFSA (XEQT 45%), rooms $87,901 / $32,200.85. */
+  async function buildSharedTickerPortfolio() {
+    const rrsp = (
+      await request(app)
+        .post('/api/accounts')
+        .send({ label: 'RRSP', roomLimitCents: 8_790_100 })
+        .expect(201)
+    ).body.accounts.at(-1).id as string;
+    const tfsa = (
+      await request(app)
+        .post('/api/accounts')
+        .send({ label: 'TFSA', roomLimitCents: 3_220_085 })
+        .expect(201)
+    ).body.accounts.at(-1).id as string;
+
+    const mkSleeve = async (accountId: string, label: string, targetBps: number) =>
+      (
+        await request(app)
+          .post('/api/sleeves')
+          .send({ accountId, label, targetBps })
+          .expect(201)
+      ).body.sleeves.at(-1).id as string;
+
+    const rrspStock = await mkSleeve(rrsp, 'RRSP stock', 4500);
+    const rrspBonds = await mkSleeve(rrsp, 'RRSP bonds', 1000);
+    const tfsaStock = await mkSleeve(tfsa, 'TFSA stock', 4500);
+
+    const mkAsset = (sleeveId: string, ticker: string) =>
+      request(app).post('/api/assets').send({ sleeveId, ticker, weightBps: 10_000 }).expect(201);
+    await mkAsset(rrspStock, 'XEQT');
+    await mkAsset(rrspBonds, 'ZAG');
+    await mkAsset(tfsaStock, 'XEQT');
+
+    return { rrsp, tfsa };
+  }
+
+  beforeEach(async () => {
+    await db.reset(); // drop the example portfolio loaded by the outer beforeEach
+  });
+
+  it('redirects TFSA overflow into the RRSP XEQT sleeve and persists it', async () => {
+    const { tfsa } = await buildSharedTickerPortfolio();
+
+    const { body } = await request(app)
+      .post('/api/invest')
+      .send({ amountCents: 10_000_000, prioritizedAccountIds: [tfsa] })
+      .expect(200);
+
+    const plan = body.plan as AllocationPlan;
+    expect(plan.redirectedCents).toBe(1_279_915);
+    expect(plan.unallocatedCents).toBe(0);
+
+    const holdings = await db.pool.query(
+      `SELECT a.ticker, s.label, a.holding_cents::int AS cents
+         FROM assets a JOIN sleeves s ON s.id = a.sleeve_id
+        ORDER BY s.label`,
+    );
+    const byLabel = Object.fromEntries(holdings.rows.map((r) => [r.label, r.cents]));
+    expect(byLabel['RRSP stock']).toBe(5_779_915);
+    expect(byLabel['RRSP bonds']).toBe(1_000_000);
+    expect(byLabel['TFSA stock']).toBe(3_220_085);
+  });
 });
 
 describe('POST /api/presets/example', () => {
