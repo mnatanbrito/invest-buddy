@@ -66,6 +66,7 @@ export function toRebalanceUnits(portfolio: PortfolioState): RebalanceUnit[] {
       id: asset.id,
       sleeveId: sleeve.id,
       accountId: sleeve.accountId,
+      ticker: asset.ticker,
       targetWeight: effectiveWeight(sleeve.targetBps, asset.weightBps),
       holdingCents: asset.holdingCents,
     })),

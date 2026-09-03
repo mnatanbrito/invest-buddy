@@ -25,11 +25,13 @@ function unit(
   sleeveTargetBps: number,
   assetWeightBps: number,
   holdingCents: number,
+  ticker: string = id,
 ): RebalanceUnit {
   return {
     id,
     sleeveId,
     accountId,
+    ticker,
     targetWeight: effectiveWeight(sleeveTargetBps, assetWeightBps),
     holdingCents,
   };

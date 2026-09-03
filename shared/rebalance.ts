@@ -10,6 +10,9 @@ export interface RebalanceUnit {
   id: string;
   sleeveId: string;
   accountId: string;
+  /** The asset's ticker, uppercased. Units with the same ticker are interchangeable
+   *  when redirecting a prioritized account's overflow. */
+  ticker: string;
   /** sleeve.targetBps * asset.weightBps, in [0, WEIGHT_SCALE]. */
   targetWeight: number;
   holdingCents: number;
