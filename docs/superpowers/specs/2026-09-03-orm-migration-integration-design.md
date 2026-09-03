@@ -3,7 +3,7 @@
 **Issue:** [#11 Integrate database ORM library](https://github.com/mnatanbrito/invest-buddy/issues/11)
 **Date:** 2026-09-03
 **Status:** Final — awaiting user review before implementation planning
-**Follow-up:** out-of-scope work tracked in a separate GitHub issue (see "Out of scope").
+**Follow-up:** out-of-scope work tracked in [#15](https://github.com/mnatanbrito/invest-buddy/issues/15).
 
 ## User story
 
@@ -189,7 +189,7 @@ the database.
 
 ## Out of scope
 
-Tracked as a follow-up GitHub issue:
+Tracked as follow-up issue [#15](https://github.com/mnatanbrito/invest-buddy/issues/15):
 
 - Repository / data-access layer refactor (extract query modules out of `app.ts`).
 - Converting the remaining raw SQL to Drizzle: the `LOCK TABLE` statements and the `/api/history`
