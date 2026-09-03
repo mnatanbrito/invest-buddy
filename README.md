@@ -53,6 +53,15 @@ RRSP or TFSA past its remaining room, that account's lines are scaled down to
 fit and the blocked remainder is reported as unallocated cash for you to place
 yourself. It is never silently moved to another account.
 
+**Prioritizing an account.** When you plan a deposit you can mark one or more
+accounts as *prioritized*. A prioritized account is filled toward its normal
+drift-aware target first, but never past its remaining contribution room. Cents
+that would have gone in beyond that room are **redirected to other sleeves holding
+the same ticker**, so the stock/bond mix stays put — they are not spread across
+every sleeve. Overflow with no same-ticker home, and any redirect that would push
+a receiving account past *its* room, falls back to unallocated cash. The choice is
+per-deposit and changes nothing that is stored.
+
 All money is handled as integer cents with largest-remainder rounding, so the
 lines always sum to exactly the deposit.
 
