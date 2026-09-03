@@ -48,8 +48,8 @@ export interface TestDatabase {
 }
 
 /**
- * Builds a throwaway database by running the generated Drizzle migrations, so the
- * tests exercise the same DDL the app ships rather than a hand-maintained copy.
+ * Builds a throwaway database and brings it up to date by running the generated
+ * Drizzle migrations, so the tests exercise the same migration chain the app ships.
  *
  * Each call gets its own database, keyed by pid and a counter, so parallel test
  * files never share state.
