@@ -157,6 +157,127 @@ describe('contribution room capping', () => {
   });
 });
 
+describe('prioritized accounts', () => {
+  // The spec's acceptance example: XEQT held in both stock sleeves, ZAG only in bonds.
+  const exampleUnits = (): RebalanceUnit[] => [
+    unit('rrsp_stock', 'rrsp_stock', 'rrsp', 4500, 10_000, 0, 'XEQT'),
+    unit('rrsp_bonds', 'rrsp_bonds', 'rrsp', 1000, 10_000, 0, 'ZAG'),
+    unit('tfsa_stock', 'tfsa_stock', 'tfsa', 4500, 10_000, 0, 'XEQT'),
+  ];
+  const exampleAccounts: RebalanceAccount[] = [
+    { id: 'rrsp', roomRemainingCents: 8_790_100 }, // $87,901.00
+    { id: 'tfsa', roomRemainingCents: 3_220_085 }, // $32,200.85
+  ];
+
+  it('fills the prioritized account to its room and redirects the overflow to the same ticker', () => {
+    const plan = planDeposit(exampleUnits(), exampleAccounts, 10_000_000, ['tfsa']);
+    expect(byId(plan)).toEqual({
+      rrsp_stock: 5_779_915,
+      rrsp_bonds: 1_000_000,
+      tfsa_stock: 3_220_085,
+    });
+    expect(plan.unallocatedCents).toBe(0);
+    expect(plan.redirectedCents).toBe(1_279_915);
+    expect(plan.prioritizedAccountIds).toEqual(['tfsa']);
+    expect(plan.cappedAccountIds).toEqual(['tfsa']);
+
+    const bySleeveRedirect = Object.fromEntries(plan.lines.map((l) => [l.assetId, l.redirectedCents]));
+    expect(bySleeveRedirect).toEqual({
+      rrsp_stock: 1_279_915,
+      rrsp_bonds: 0,
+      tfsa_stock: -1_279_915,
+    });
+    expect(plan.lines.reduce((s, l) => s + l.redirectedCents, 0)).toBe(0);
+    for (const l of plan.lines) {
+      expect(l.amountCents).toBe(l.intendedCents + l.redirectedCents - l.blockedCents);
+    }
+  });
+
+  it('is a no-op when the prioritized account fits within its room', () => {
+    const bare = planDeposit(exampleUnits(), exampleAccounts, 1_000_000);
+    const prio = planDeposit(exampleUnits(), exampleAccounts, 1_000_000, ['tfsa']);
+    expect(byId(prio)).toEqual(byId(bare));
+    expect(prio.redirectedCents).toBe(0);
+    expect(prio.cappedAccountIds).toEqual([]);
+    expect(prio.prioritizedAccountIds).toEqual(['tfsa']);
+  });
+
+  it('is a no-op when the prioritized account has unlimited room', () => {
+    const accounts: RebalanceAccount[] = [
+      { id: 'rrsp', roomRemainingCents: 8_790_100 },
+      { id: 'tfsa', roomRemainingCents: null },
+    ];
+    const bare = planDeposit(exampleUnits(), accounts, 10_000_000);
+    const prio = planDeposit(exampleUnits(), accounts, 10_000_000, ['tfsa']);
+    expect(byId(prio)).toEqual(byId(bare));
+    expect(prio.redirectedCents).toBe(0);
+  });
+
+  it('holds overflow as cash when no non-prioritized sleeve shares the ticker', () => {
+    // tfsa_stock is now XEIT, held nowhere else.
+    const units: RebalanceUnit[] = [
+      unit('rrsp_stock', 'rrsp_stock', 'rrsp', 4500, 10_000, 0, 'XEQT'),
+      unit('rrsp_bonds', 'rrsp_bonds', 'rrsp', 1000, 10_000, 0, 'ZAG'),
+      unit('tfsa_stock', 'tfsa_stock', 'tfsa', 4500, 10_000, 0, 'XEIT'),
+    ];
+    const plan = planDeposit(units, exampleAccounts, 10_000_000, ['tfsa']);
+    expect(byId(plan)).toEqual({
+      rrsp_stock: 4_500_000,
+      rrsp_bonds: 1_000_000,
+      tfsa_stock: 3_220_085,
+    });
+    expect(plan.redirectedCents).toBe(0);
+    expect(plan.unallocatedCents).toBe(1_279_915);
+    const tfsaLine = plan.lines.find((l) => l.assetId === 'tfsa_stock')!;
+    expect(tfsaLine.blockedCents).toBe(1_279_915);
+    expect(tfsaLine.redirectedCents).toBe(0);
+  });
+
+  it('lets redirected cents that overflow a non-prioritized account fall back to cash', () => {
+    // RRSP has almost no room, so it cannot absorb the redirect from TFSA.
+    const accounts: RebalanceAccount[] = [
+      { id: 'rrsp', roomRemainingCents: 4_600_000 }, // fits its own $45k base, little more
+      { id: 'tfsa', roomRemainingCents: 3_220_085 },
+    ];
+    const plan = planDeposit(exampleUnits(), accounts, 10_000_000, ['tfsa']);
+    expect(plan.allocatedCents + plan.unallocatedCents).toBe(10_000_000);
+    expect(plan.unallocatedCents).toBeGreaterThan(0);
+    expect(plan.cappedAccountIds).toEqual(expect.arrayContaining(['tfsa', 'rrsp']));
+    for (const l of plan.lines) {
+      expect(l.amountCents).toBe(l.intendedCents + l.redirectedCents - l.blockedCents);
+      expect(l.blockedCents).toBeGreaterThanOrEqual(0);
+    }
+    for (const account of accounts) {
+      const used = plan.lines
+        .filter((l) => l.accountId === account.id)
+        .reduce((s, l) => s + l.amountCents, 0);
+      expect(used).toBeLessThanOrEqual(account.roomRemainingCents!);
+    }
+  });
+
+  it('caps two prioritized accounts independently and pools their overflow per ticker', () => {
+    const units: RebalanceUnit[] = [
+      unit('rrsp_stock', 'rrsp_stock', 'rrsp', 3000, 10_000, 0, 'XEQT'),
+      unit('tfsa_stock', 'tfsa_stock', 'tfsa', 3000, 10_000, 0, 'XEQT'),
+      unit('nr_stock', 'nr_stock', 'nr', 4000, 10_000, 0, 'XEQT'),
+    ];
+    const accounts: RebalanceAccount[] = [
+      { id: 'rrsp', roomRemainingCents: 1_000_000 },
+      { id: 'tfsa', roomRemainingCents: 1_000_000 },
+      { id: 'nr', roomRemainingCents: null },
+    ];
+    const plan = planDeposit(units, accounts, 10_000_000, ['rrsp', 'tfsa']);
+    expect(byId(plan)).toEqual({
+      rrsp_stock: 1_000_000,
+      tfsa_stock: 1_000_000,
+      nr_stock: 8_000_000, // its own $4m base + $2m + $2m redirected
+    });
+    expect(plan.redirectedCents).toBe(4_000_000);
+    expect(plan.unallocatedCents).toBe(0);
+    expect(plan.lines.reduce((s, l) => s + l.redirectedCents, 0)).toBe(0);
+  });
+});
+
 describe('invariants', () => {
   it('never loses or invents a cent, across many random deposits', () => {
     let seed = 42;
@@ -179,11 +300,20 @@ describe('invariants', () => {
         { id: 'non_registered', roomRemainingCents: null },
       ];
       const deposit = 1 + rand(5_000_000);
-      const plan = planDeposit(units(holdings), accounts, deposit);
+      const maybePriority = [
+        ...(rand(2) === 0 ? ['rrsp'] : []),
+        ...(rand(2) === 0 ? ['tfsa'] : []),
+      ];
+      const plan = planDeposit(units(holdings), accounts, deposit, maybePriority);
 
       expect(plan.allocatedCents + plan.unallocatedCents).toBe(deposit);
       expect(plan.lines.reduce((s, l) => s + l.amountCents, 0)).toBe(plan.allocatedCents);
       expect(plan.lines.every((l) => l.amountCents >= 0 && l.blockedCents >= 0)).toBe(true);
+      expect(plan.lines.reduce((s, l) => s + l.redirectedCents, 0)).toBe(0);
+      for (const l of plan.lines) {
+        expect(l.amountCents).toBe(l.intendedCents + l.redirectedCents - l.blockedCents);
+        expect(l.blockedCents).toBeGreaterThanOrEqual(0);
+      }
 
       for (const account of accounts) {
         if (account.roomRemainingCents === null) continue;

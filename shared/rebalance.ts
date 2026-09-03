@@ -69,6 +69,7 @@ export function planDeposit(
   units: RebalanceUnit[],
   accounts: RebalanceAccount[],
   depositCents: number,
+  prioritizedAccountIds: readonly string[] = [],
 ): AllocationPlan {
   if (!Number.isInteger(depositCents) || depositCents <= 0) {
     throw new RangeError(`deposit must be a positive whole number of cents, got ${depositCents}`);
@@ -77,32 +78,98 @@ export function planDeposit(
   const deposit = BigInt(depositCents);
   const totalHoldings = units.reduce((sum, u) => sum + BigInt(u.holdingCents), 0n);
   const totalAfter = totalHoldings + deposit;
+  const prioritized = new Set(prioritizedAccountIds);
 
+  // Phase 1: drift-aware base plan (unchanged from the pre-prioritization engine).
   const needs = units.map((u) => {
     const shortfall = BigInt(u.targetWeight) * totalAfter - BigInt(u.holdingCents) * WEIGHT_SCALE;
     return shortfall > 0n ? shortfall : 0n;
   });
+  const base = apportion(needs, deposit);
 
-  const intended = apportion(needs, deposit);
-
-  // Cap each registered account at its remaining contribution room. The blocked
-  // remainder is NOT redirected elsewhere; it comes back as unallocated cash.
-  const amounts = intended.slice();
+  const amounts = base.slice();
+  const redirected = units.map(() => 0n);
+  const blocked = units.map(() => 0n);
   const cappedAccountIds: string[] = [];
 
+  const indicesFor = (accountId: string) =>
+    units.flatMap((u, i) => (u.accountId === accountId ? [i] : []));
+
+  // Phase 2: fill each prioritized account to its remaining room, pooling the
+  // freed cents by ticker and handing them to non-prioritized units of the same
+  // ticker so the asset mix is preserved.
+  const pool = new Map<string, { index: number; freed: bigint }[]>();
+
   for (const account of accounts) {
-    if (account.roomRemainingCents === null) continue;
+    if (!prioritized.has(account.id) || account.roomRemainingCents === null) continue;
 
     const room = BigInt(Math.max(0, account.roomRemainingCents));
-    const indices = units.flatMap((u, i) => (u.accountId === account.id ? [i] : []));
-    const wanted = indices.reduce((sum, i) => sum + intended[i], 0n);
+    const indices = indicesFor(account.id);
+    const wanted = indices.reduce((sum, i) => sum + amounts[i], 0n);
     if (wanted <= room) continue;
 
     const fitted = apportion(
-      indices.map((i) => intended[i]),
+      indices.map((i) => amounts[i]),
       room,
     );
     indices.forEach((i, k) => {
+      const freed = amounts[i] - fitted[k];
+      amounts[i] = fitted[k];
+      if (freed > 0n) {
+        const entry = pool.get(units[i].ticker) ?? [];
+        entry.push({ index: i, freed });
+        pool.set(units[i].ticker, entry);
+      }
+    });
+    cappedAccountIds.push(account.id);
+  }
+
+  for (const [ticker, sources] of pool) {
+    const poolCents = sources.reduce((sum, s) => sum + s.freed, 0n);
+    const recipients = units.flatMap((u, i) =>
+      !prioritized.has(u.accountId) && u.ticker === ticker && u.targetWeight > 0 ? [i] : [],
+    );
+
+    if (recipients.length === 0) {
+      // No same-ticker home: the overflow stays as cash, charged to its sources.
+      for (const s of sources) blocked[s.index] += s.freed;
+      continue;
+    }
+
+    const remaining = recipients.map((i) => {
+      const shortfall =
+        BigInt(units[i].targetWeight) * totalAfter -
+        (BigInt(units[i].holdingCents) + amounts[i]) * WEIGHT_SCALE;
+      return shortfall > 0n ? shortfall : 0n;
+    });
+    const weights = remaining.some((w) => w > 0n)
+      ? remaining
+      : recipients.map((i) => BigInt(units[i].targetWeight));
+
+    const add = apportion(weights, poolCents);
+    recipients.forEach((i, k) => {
+      amounts[i] += add[k];
+      redirected[i] += add[k];
+    });
+    for (const s of sources) redirected[s.index] -= s.freed;
+  }
+
+  // Phase 3: cap each non-prioritized account at its room (unchanged behavior).
+  // The blocked remainder is held as cash and is never redirected.
+  for (const account of accounts) {
+    if (prioritized.has(account.id) || account.roomRemainingCents === null) continue;
+
+    const room = BigInt(Math.max(0, account.roomRemainingCents));
+    const indices = indicesFor(account.id);
+    const wanted = indices.reduce((sum, i) => sum + amounts[i], 0n);
+    if (wanted <= room) continue;
+
+    const fitted = apportion(
+      indices.map((i) => amounts[i]),
+      room,
+    );
+    indices.forEach((i, k) => {
+      blocked[i] += amounts[i] - fitted[k];
       amounts[i] = fitted[k];
     });
     cappedAccountIds.push(account.id);
@@ -112,12 +179,15 @@ export function planDeposit(
     assetId: u.id,
     sleeveId: u.sleeveId,
     accountId: u.accountId,
-    intendedCents: Number(intended[i]),
+    intendedCents: Number(base[i]),
     amountCents: Number(amounts[i]),
-    blockedCents: Number(intended[i] - amounts[i]),
+    blockedCents: Number(blocked[i]),
+    redirectedCents: Number(redirected[i]),
   }));
 
   const allocatedCents = lines.reduce((sum, l) => sum + l.amountCents, 0);
+  const redirectedCents = lines.reduce((sum, l) => (l.redirectedCents > 0 ? sum + l.redirectedCents : sum), 0);
+  const knownPrioritized = [...prioritized].filter((id) => units.some((u) => u.accountId === id));
 
   return {
     requestedCents: depositCents,
@@ -125,6 +195,8 @@ export function planDeposit(
     unallocatedCents: depositCents - allocatedCents,
     lines,
     cappedAccountIds,
+    prioritizedAccountIds: knownPrioritized,
+    redirectedCents,
   };
 }
 
