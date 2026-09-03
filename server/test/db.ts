@@ -1,13 +1,7 @@
 import path from 'node:path';
 import { Pool } from 'pg';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
-import {
-  DEFAULT_CONNECTION_STRING,
-  createDb,
-  createPool,
-  withTransaction,
-  type Database,
-} from '../db/pool';
+import { DEFAULT_CONNECTION_STRING, createDb, createPool, type Database } from '../db/pool';
 import { EXAMPLE_PORTFOLIO, insertPortfolio } from '../presets/example';
 
 const MIGRATIONS_DIR = path.resolve(import.meta.dirname, '../db/migrations');
@@ -87,6 +81,6 @@ export async function createTestDatabase(label: string): Promise<TestDatabase> {
 }
 
 /** Loads the example account/sleeve/asset tree into an (assumed empty) test database. */
-export async function loadExample(pool: Pool): Promise<void> {
-  await withTransaction(pool, (client) => insertPortfolio(client, EXAMPLE_PORTFOLIO));
+export async function loadExample(orm: Database): Promise<void> {
+  await orm.transaction((tx) => insertPortfolio(tx, EXAMPLE_PORTFOLIO));
 }

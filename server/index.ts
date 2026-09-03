@@ -1,8 +1,8 @@
 import { createApp } from './app';
-import { createPool } from './db/pool';
+import { createDb, createPool } from './db/pool';
 
 const PORT = Number(process.env.PORT ?? 3001);
 
-createApp(createPool()).listen(PORT, () => {
+createApp(createDb(createPool())).listen(PORT, () => {
   console.log(`invest-buddy api listening on http://localhost:${PORT}`);
 });

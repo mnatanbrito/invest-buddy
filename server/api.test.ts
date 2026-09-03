@@ -10,7 +10,7 @@ let app: Express;
 
 beforeAll(async () => {
   db = await createTestDatabase('api');
-  app = createApp(db.pool);
+  app = createApp(db.orm);
 });
 
 afterAll(async () => {
@@ -19,7 +19,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await db.reset();
-  await loadExample(db.pool);
+  await loadExample(db.orm);
 });
 
 const invest = (amountCents: unknown) =>

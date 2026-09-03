@@ -1,4 +1,3 @@
-import type { PoolClient } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { deleteBlockers, readPortfolio } from './portfolio';
 import { createTestDatabase, loadExample, type TestDatabase } from './test/db';
@@ -15,17 +14,12 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await db.reset();
-  await loadExample(db.pool);
+  await loadExample(db.orm);
 });
 
-/** Runs a read against a checked-out client, mirroring how the routes call it. */
+/** Reads portfolio state straight off the Drizzle handle, like the routes do. */
 async function read() {
-  const client: PoolClient = await db.pool.connect();
-  try {
-    return await readPortfolio(client);
-  } finally {
-    client.release();
-  }
+  return readPortfolio(db.orm);
 }
 
 /** Records an investment line directly, bypassing the API, to set up ledger state. */
@@ -187,15 +181,15 @@ describe('readPortfolio weights', () => {
 
 describe('deleteBlockers', () => {
   it('reports nothing blocking a fresh asset, sleeve or account', async () => {
-    expect(await withClient((c) => deleteBlockers(c, 'asset', 'us_equity_vti'))).toEqual({
+    expect(await deleteBlockers(db.orm, 'asset', 'us_equity_vti')).toEqual({
       holdingCents: 0,
       hasHistory: false,
     });
-    expect(await withClient((c) => deleteBlockers(c, 'sleeve', 'us_equity'))).toEqual({
+    expect(await deleteBlockers(db.orm, 'sleeve', 'us_equity')).toEqual({
       holdingCents: 0,
       hasHistory: false,
     });
-    expect(await withClient((c) => deleteBlockers(c, 'account', 'rrsp'))).toEqual({
+    expect(await deleteBlockers(db.orm, 'account', 'rrsp')).toEqual({
       holdingCents: 0,
       hasHistory: false,
     });
@@ -203,11 +197,11 @@ describe('deleteBlockers', () => {
 
   it('reports current holdings as a blocker, scoped to descendants', async () => {
     await recordInvestment({ us_equity_vti: 450_000 });
-    expect(await withClient((c) => deleteBlockers(c, 'asset', 'us_equity_vti'))).toMatchObject({
+    expect(await deleteBlockers(db.orm, 'asset', 'us_equity_vti')).toMatchObject({
       holdingCents: 450_000,
       hasHistory: true,
     });
-    expect(await withClient((c) => deleteBlockers(c, 'sleeve', 'cad_bonds'))).toEqual({
+    expect(await deleteBlockers(db.orm, 'sleeve', 'cad_bonds')).toEqual({
       holdingCents: 0,
       hasHistory: false,
     });
@@ -217,7 +211,7 @@ describe('deleteBlockers', () => {
     await recordInvestment({ us_equity_vti: 450_000 });
     await db.pool.query("UPDATE assets SET holding_cents = 0 WHERE id = 'us_equity_vti'");
 
-    expect(await withClient((c) => deleteBlockers(c, 'asset', 'us_equity_vti'))).toEqual({
+    expect(await deleteBlockers(db.orm, 'asset', 'us_equity_vti')).toEqual({
       holdingCents: 0,
       hasHistory: true,
     });
@@ -225,18 +219,9 @@ describe('deleteBlockers', () => {
 
   it('scopes account-level blockers to every descendant asset', async () => {
     await recordInvestment({ cad_bonds_vab: 100_000 });
-    expect(await withClient((c) => deleteBlockers(c, 'account', 'rrsp'))).toMatchObject({
+    expect(await deleteBlockers(db.orm, 'account', 'rrsp')).toMatchObject({
       holdingCents: 100_000,
       hasHistory: true,
     });
   });
 });
-
-async function withClient<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
-  const client = await db.pool.connect();
-  try {
-    return await fn(client);
-  } finally {
-    client.release();
-  }
-}
