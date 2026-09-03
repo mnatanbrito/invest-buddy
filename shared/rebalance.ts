@@ -94,6 +94,7 @@ export function planDeposit(
 
   const indicesFor = (accountId: string) =>
     units.flatMap((u, i) => (u.accountId === accountId ? [i] : []));
+  const accountById = new Map(accounts.map((a) => [a.id, a]));
 
   // Phase 2: fill each prioritized account to its remaining room, pooling the
   // freed cents by ticker and handing them to non-prioritized units of the same
@@ -146,12 +147,91 @@ export function planDeposit(
       ? remaining
       : recipients.map((i) => BigInt(units[i].targetWeight));
 
-    const add = apportion(weights, poolCents);
+    // Group the recipients by account: the pool is handed out per account so it can
+    // be clamped at that account's remaining room. Landing cents an account can't
+    // hold would only make Phase 3 scale the whole account back down, clawing cents
+    // out of its other sleeves — the mix drift this feature exists to prevent.
+    const recipientAccounts: string[] = [];
+    const weightOf = new Map<string, bigint>();
+    const membersOf = new Map<string, number[]>();
     recipients.forEach((i, k) => {
-      amounts[i] += add[k];
-      redirected[i] += add[k];
+      const id = units[i].accountId;
+      if (!weightOf.has(id)) {
+        recipientAccounts.push(id);
+        weightOf.set(id, 0n);
+        membersOf.set(id, []);
+      }
+      weightOf.set(id, weightOf.get(id)! + weights[k]);
+      membersOf.get(id)!.push(k);
     });
-    for (const s of sources) redirected[s.index] -= s.freed;
+
+    // Headroom is measured against `amounts` as it stands, so it already counts the
+    // Phase-1 base, the account's other sleeves, and any earlier ticker pool's redirect.
+    const headroomOf = new Map<string, bigint | null>();
+    for (const id of recipientAccounts) {
+      const room = accountById.get(id)?.roomRemainingCents ?? null;
+      if (room === null) {
+        headroomOf.set(id, null);
+        continue;
+      }
+      const used = indicesFor(id).reduce((sum, i) => sum + amounts[i], 0n);
+      const free = BigInt(Math.max(0, room)) - used;
+      headroomOf.set(id, free > 0n ? free : 0n);
+    }
+
+    // Water-fill: share what's left by account weight, clamp anyone who hits their
+    // headroom, and go round again with the cents that bounced. Each round either
+    // places everything or fills at least one account, so this terminates.
+    const got = new Map<string, bigint>(recipientAccounts.map((id) => [id, 0n]));
+    let unplaced = poolCents;
+    while (unplaced > 0n) {
+      const eligible = recipientAccounts.filter((id) => {
+        const cap = headroomOf.get(id)!;
+        return weightOf.get(id)! > 0n && (cap === null || got.get(id)! < cap);
+      });
+      if (eligible.length === 0) break;
+
+      const share = apportion(
+        eligible.map((id) => weightOf.get(id)!),
+        unplaced,
+      );
+      let progressed = false;
+      eligible.forEach((id, k) => {
+        const cap = headroomOf.get(id)!;
+        const roomLeft = cap === null ? share[k] : cap - got.get(id)!;
+        const take = share[k] < roomLeft ? share[k] : roomLeft;
+        if (take > 0n) {
+          got.set(id, got.get(id)! + take);
+          unplaced -= take;
+          progressed = true;
+        }
+      });
+      if (!progressed) break;
+    }
+    const placed = poolCents - unplaced;
+
+    for (const id of recipientAccounts) {
+      const members = membersOf.get(id)!;
+      const add = apportion(
+        members.map((k) => weights[k]),
+        got.get(id)!,
+      );
+      members.forEach((k, m) => {
+        amounts[recipients[k]] += add[m];
+        redirected[recipients[k]] += add[m];
+      });
+    }
+
+    // Charge the sources in proportion to what each freed: the placed share moves as
+    // a redirect, the share that found no home falls out to cash.
+    const placedBySource = apportion(
+      sources.map((s) => s.freed),
+      placed,
+    );
+    sources.forEach((s, k) => {
+      redirected[s.index] -= placedBySource[k];
+      blocked[s.index] += s.freed - placedBySource[k];
+    });
   }
 
   // Phase 3: cap each non-prioritized account at its room (unchanged behavior).
@@ -187,7 +267,7 @@ export function planDeposit(
 
   const allocatedCents = lines.reduce((sum, l) => sum + l.amountCents, 0);
   const redirectedCents = lines.reduce((sum, l) => (l.redirectedCents > 0 ? sum + l.redirectedCents : sum), 0);
-  const knownPrioritized = [...prioritized].filter((id) => units.some((u) => u.accountId === id));
+  const knownPrioritized = [...prioritized].filter((id) => accountById.has(id));
 
   return {
     requestedCents: depositCents,

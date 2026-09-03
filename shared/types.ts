@@ -68,8 +68,8 @@ export interface AllocationLine {
   intendedCents: number;
   /** What actually goes in. */
   amountCents: number;
-  /** `intendedCents - amountCents`: blocked by contribution room, or a prioritized
-   *  overflow with no same-ticker home. Always >= 0. */
+  /** Cents that fell out to cash: contribution room ran out, or a prioritized
+   *  overflow had no same-ticker home. Always >= 0. */
   blockedCents: number;
   /** Net effect of the mix-preserving redirect on this line: negative on a
    *  prioritized account's overflow line (placed portion only), positive on a

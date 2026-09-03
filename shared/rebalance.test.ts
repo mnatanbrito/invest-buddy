@@ -9,13 +9,20 @@ import {
   type RebalanceUnit,
 } from './rebalance';
 
-/** The five sleeves from the target allocation diagram, one asset each (weightBps: 10000). */
+/**
+ * The five sleeves from the target allocation diagram, one asset each (weightBps: 10000).
+ *
+ * `cad_equity` (TFSA) and `em_equity` (non-registered) deliberately share the `XEQT`
+ * ticker so that prioritizing the TFSA has a real same-ticker recipient to redirect
+ * into. Ticker only matters when `prioritizedAccountIds` is non-empty, so this is
+ * invisible to every three-argument `planDeposit` call.
+ */
 const units = (holdings: Partial<Record<string, number>> = {}): RebalanceUnit[] => [
   unit('us_equity', 'rrsp', 'rrsp', 4500, 10_000, holdings.us_equity ?? 0),
   unit('cad_bonds', 'rrsp', 'rrsp', 1000, 10_000, holdings.cad_bonds ?? 0),
-  unit('cad_equity', 'tfsa', 'tfsa', 2000, 10_000, holdings.cad_equity ?? 0),
+  unit('cad_equity', 'tfsa', 'tfsa', 2000, 10_000, holdings.cad_equity ?? 0, 'XEQT'),
   unit('intl_equity', 'tfsa', 'tfsa', 1500, 10_000, holdings.intl_equity ?? 0),
-  unit('em_equity', 'non_registered', 'non_registered', 1000, 10_000, holdings.em_equity ?? 0),
+  unit('em_equity', 'non_registered', 'non_registered', 1000, 10_000, holdings.em_equity ?? 0, 'XEQT'),
 ];
 
 function unit(
@@ -273,6 +280,72 @@ describe('prioritized accounts', () => {
       nr_stock: 8_000_000, // its own $4m base + $2m + $2m redirected
     });
     expect(plan.redirectedCents).toBe(4_000_000);
+    expect(plan.unallocatedCents).toBe(0);
+    expect(plan.lines.reduce((s, l) => s + l.redirectedCents, 0)).toBe(0);
+  });
+
+  it('clamps the redirect at the recipient account room instead of clawing back its other sleeves', () => {
+    // RRSP has room for its own $45k stock + $10k bonds base plus only $5k more, so
+    // most of the TFSA's overflow has nowhere to land. The bonds sleeve must keep its
+    // full base: a redirect it never asked for must not scale it back down.
+    const accounts: RebalanceAccount[] = [
+      { id: 'rrsp', roomRemainingCents: 6_000_000 }, // $60,000
+      { id: 'tfsa', roomRemainingCents: 3_220_085 },
+    ];
+    const plan = planDeposit(exampleUnits(), accounts, 10_000_000, ['tfsa']);
+    const got = byId(plan);
+
+    expect(got.rrsp_bonds).toBe(1_000_000);
+    // RRSP stock fills to the account room: $60k total - $10k bonds = $50k.
+    expect(got.rrsp_stock).toBe(5_000_000);
+    expect(got.tfsa_stock).toBe(3_220_085);
+    // Only the cents that actually landed count as redirected.
+    expect(plan.redirectedCents).toBe(500_000);
+    // The rest of the TFSA's $12,799.15 overflow had nowhere to go and is cash.
+    expect(plan.unallocatedCents).toBe(779_915);
+    expect(plan.allocatedCents).toBe(9_220_085);
+    // RRSP was never capped: the redirect stopped at its headroom in the first place.
+    expect(plan.cappedAccountIds).toEqual(['tfsa']);
+
+    const byRedirect = Object.fromEntries(plan.lines.map((l) => [l.assetId, l.redirectedCents]));
+    expect(byRedirect).toEqual({ rrsp_stock: 500_000, rrsp_bonds: 0, tfsa_stock: -500_000 });
+    const byBlocked = Object.fromEntries(plan.lines.map((l) => [l.assetId, l.blockedCents]));
+    expect(byBlocked).toEqual({ rrsp_stock: 0, rrsp_bonds: 0, tfsa_stock: 779_915 });
+
+    expect(plan.lines.reduce((s, l) => s + l.redirectedCents, 0)).toBe(0);
+    for (const l of plan.lines) {
+      expect(l.amountCents).toBe(l.intendedCents + l.redirectedCents - l.blockedCents);
+      expect(l.blockedCents).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it('weights the redirect by drift, starving a recipient that is already over target', () => {
+    // Both non-registered sleeves hold XEQT, but nr_over is far above its target while
+    // nr_under is below it, so the shortfall weights (not the target-weight fallback)
+    // decide the split — and nr_over's shortfall is zero.
+    const units: RebalanceUnit[] = [
+      unit('tfsa_stock', 'tfsa_stock', 'tfsa', 5000, 10_000, 0, 'XEQT'),
+      unit('nr_over', 'nr_over', 'nr', 2500, 10_000, 5_000_000, 'XEQT'),
+      unit('nr_under', 'nr_under', 'nr', 2500, 10_000, 0, 'XEQT'),
+    ];
+    const accounts: RebalanceAccount[] = [
+      { id: 'tfsa', roomRemainingCents: 1_000_000 },
+      { id: 'nr', roomRemainingCents: null },
+    ];
+    const plan = planDeposit(units, accounts, 10_000_000, ['tfsa']);
+
+    // Phase 1 on a $150,000 post-deposit total: nr_over is already past its $37,500
+    // target so it gets nothing; the base is $66,666.67 TFSA / $33,333.33 nr_under.
+    const intended = Object.fromEntries(plan.lines.map((l) => [l.assetId, l.intendedCents]));
+    expect(intended).toEqual({ tfsa_stock: 6_666_667, nr_over: 0, nr_under: 3_333_333 });
+
+    // The TFSA caps at $10,000, freeing $56,666.67 — all of which goes to nr_under.
+    expect(byId(plan)).toEqual({
+      tfsa_stock: 1_000_000,
+      nr_over: 0,
+      nr_under: 9_000_000,
+    });
+    expect(plan.redirectedCents).toBe(5_666_667);
     expect(plan.unallocatedCents).toBe(0);
     expect(plan.lines.reduce((s, l) => s + l.redirectedCents, 0)).toBe(0);
   });
