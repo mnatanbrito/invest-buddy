@@ -15,7 +15,7 @@
     "db:reset": "tsx server/db/reset.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:check": "drizzle-kit check",
+    "db:check": "drizzle-kit generate && git diff --exit-code server/db/migrations",
     "test:watch": "vitest"
   },
   "dependencies": {

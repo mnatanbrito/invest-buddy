@@ -53,6 +53,9 @@ jobs:
 
       - run: pnpm typecheck
 
+      # Fails if server/db/schema.ts has changed without a matching migration.
+      - run: pnpm db:check
+
       - run: pnpm test
 
       - run: pnpm build

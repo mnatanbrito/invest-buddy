@@ -63,8 +63,7 @@ Requires Node 20+, pnpm, and PostgreSQL running locally.
 ```bash
 pnpm install
 
-# One-time: create the database, then load the schema.
-createdb invest_buddy
+# One-time: create the database and bring it up to date.
 pnpm db:reset
 
 pnpm dev          # api on :3001, web on :5173
@@ -74,10 +73,12 @@ Point at a different database with `DATABASE_URL`.
 
 ### First run
 
-`pnpm db:reset` only loads `schema.sql`, so the app starts with an empty portfolio.
-From there, either build your accounts, sleeves, and assets by hand in the **Edit**
-view, or click **Load example portfolio** on the empty-state screen to load the
-RRSP/TFSA/non-registered tree described above.
+`pnpm db:reset` recreates the database from the migrations in `server/db/migrations/`,
+so the app starts with an empty portfolio. From there, either build your accounts,
+sleeves, and assets by hand in the **Edit** view, or click **Load example portfolio**
+on the empty-state screen to load the RRSP/TFSA/non-registered tree described above.
+
+Applying a new migration to an existing database (without wiping it) is `pnpm db:migrate`.
 
 Whichever way you start, set your real contribution room and any balances you
 already hold from the **Edit** view: the edit icon on an account opens its account
@@ -118,6 +119,10 @@ Check the server is actually up before assuming a connection problem:
 pg_isready                 # expects: /tmp:5432 - accepting connections
 brew services list         # shows whether postgresql@18 is started
 ```
+
+None of the project's `pnpm db:*` scripts need this: they reach Postgres through
+`pg`, not the `psql` binary. The PATH fix only matters for running `psql`
+interactively.
 
 ### Useful queries
 
@@ -164,15 +169,26 @@ SELECT i.id,
 ```
 
 Schema reference: `\dt` lists the five tables (`accounts`, `sleeves`, `assets`,
-`investments`, `investment_lines`), `\d assets` describes one.
+`investments`, `investment_lines`), `\d assets` describes one. The schema is
+defined in `server/db/schema.ts`; generated SQL lives in `server/db/migrations/`.
 
 ### Resetting
 
-`pnpm db:reset` drops every table and reloads `schema.sql`. **It destroys all
-recorded investments and holdings**, and leaves the portfolio empty — there is no
-seed data anymore. Use the app's "Load example portfolio" button (or
-`POST /api/presets/example`) afterwards if you want the example data back. It also
-shells out to `psql`, so it needs the PATH fix above.
+`pnpm db:reset` drops and recreates the database, then replays every migration.
+**It destroys all recorded investments and holdings** and leaves the portfolio
+empty. Use the app's "Load example portfolio" button (or
+`POST /api/presets/example`) afterwards to get the example data back.
+
+### Changing the schema
+
+1. Edit `server/db/schema.ts`.
+2. `pnpm db:generate` — writes a new SQL file under `server/db/migrations/`.
+3. Read the generated SQL and commit it with the schema change.
+4. `pnpm db:migrate` to apply it to your local database (or `pnpm db:reset` to
+   rebuild from scratch).
+
+CI runs `pnpm db:check`, which fails if `schema.ts` changed without a matching
+migration.
 
 
 ## Scripts
@@ -185,7 +201,10 @@ shells out to `psql`, so it needs the PATH fix above.
 | `pnpm lint`      | oxlint; any warning fails the run                |
 | `pnpm typecheck` | Typecheck client and server                      |
 | `pnpm build`     | Production build                                 |
-| `pnpm db:reset`  | Drop and recreate all tables from `schema.sql` (portfolio starts empty) |
+| `pnpm db:reset`  | Drop the database, recreate it, and replay all migrations (portfolio starts empty) |
+| `pnpm db:generate`| Generate a migration from changes to `server/db/schema.ts` |
+| `pnpm db:migrate`| Apply pending migrations to `DATABASE_URL` |
+| `pnpm db:check`  | Verify `server/db/schema.ts` and the committed migrations agree (regenerates and fails on any diff) |
 
 ## Tests
 
@@ -199,11 +218,11 @@ tests — the logic those components rely on is covered directly.
 
 **The server tests need a running local PostgreSQL.** They do not touch your
 `invest_buddy` database: `server/test/db.ts` creates a throwaway database per test
-file from the same `schema.sql` the app ships, loads the example account/sleeve/
-asset tree (`server/presets/example.ts`) into it where a test needs starting data,
-and drops the database afterwards. It connects through `pg` rather than shelling
-out to `createdb`, so it does not need `psql` on your PATH. Set `DATABASE_URL` to
-point the tests at a different server.
+file and brings it up to date with the generated Drizzle migrations, loads the
+example account/sleeve/asset tree (`server/presets/example.ts`) into it where a
+test needs starting data, and drops the database afterwards. It connects through
+`pg` rather than shelling out to `createdb`, so it does not need `psql` on your
+PATH. Set `DATABASE_URL` to point the tests at a different server.
 
 The API tests run against `createApp(pool)` via supertest without binding a port,
 which is why `server/index.ts` is only an entrypoint and all the routes live in
@@ -234,11 +253,11 @@ configuration, so this cannot be automated away without a dependency.
 ```
 shared/         rebalance.ts — the engine, plus its tests. Pure, no I/O.
                 types.ts     — contracts shared by API and client.
-server/         app.ts       — createApp(pool): every route, pool injected.
-                index.ts     — entrypoint: builds a pool and listens.
+server/         app.ts       — createApp(db): every route, Drizzle instance injected.
+                index.ts     — entrypoint: builds the db and listens.
                 portfolio.ts — reads portfolio state out of Postgres.
                 presets/example.ts — the opt-in example account/sleeve/asset tree.
-                db/          — schema.sql, connection pool.
+                db/          — schema.ts, migrations/, connection pool, reset script.
                 test/db.ts   — throwaway database for tests.
 src/            App.tsx      — page shell, amount input, invest flow, Plan/Edit toggle.
                 components/EmptyState.tsx — first-run screen when the portfolio is empty.
