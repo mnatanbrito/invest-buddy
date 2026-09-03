@@ -36,7 +36,11 @@ export interface TestDatabase {
   /** Drizzle instance bound to the same throwaway pool. */
   orm: Database;
   name: string;
-  /** Truncate the ledger and restore seeded values, without paying to recreate the database. */
+  /**
+   * Truncates all five tables and resets their identity sequences — nothing more,
+   * and cheaper than recreating the database. Callers that need starting data
+   * invoke `loadExample` separately afterwards.
+   */
   reset: () => Promise<void>;
   drop: () => Promise<void>;
 }

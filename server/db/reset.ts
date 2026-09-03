@@ -6,6 +6,11 @@ import { DEFAULT_CONNECTION_STRING, createDb, createPool } from './pool';
 const MIGRATIONS_DIR = path.resolve(import.meta.dirname, 'migrations');
 const targetUrl = process.env.DATABASE_URL ?? DEFAULT_CONNECTION_STRING;
 const dbName = new URL(targetUrl).pathname.replace(/^\//, '') || 'invest_buddy';
+if (dbName === 'postgres') {
+  throw new Error(
+    'refusing to reset the "postgres" maintenance database — set DATABASE_URL to a real target',
+  );
+}
 
 /** Same server, different database name — used to reach the `postgres` maintenance DB. */
 function urlForDatabase(name: string): string {

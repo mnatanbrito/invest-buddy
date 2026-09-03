@@ -50,7 +50,6 @@ describe('schema built from the generated migrations', () => {
     const { rows } = await db.pool.query<{
       conname: string;
       confdeltype: string;
-      conrelid: string;
       table_name: string;
     }>(
       `SELECT c.conname, c.confdeltype, r.relname AS table_name
@@ -78,6 +77,7 @@ describe('schema built from the generated migrations', () => {
         'assets_sleeve_idx',
         'investment_lines_investment_idx',
         'investment_lines_asset_idx',
+        'investment_lines_investment_id_asset_id_key',
         'asset_ticker_unique_in_sleeve',
       ]),
     );

@@ -87,8 +87,13 @@ export async function readPortfolio(exec: Executor): Promise<PortfolioState> {
     .groupBy(sleeves.accountId)
     .as('used');
 
-  // Sequential, not Promise.all: inside a transaction `exec` is a single
-  // connection, and there is nothing to gain from parallelism on one.
+  // Sequential, not Promise.all. When `exec` is a transaction the three reads
+  // share one connection and one snapshot, so parallelism buys nothing. When
+  // `/api/portfolio` and `/api/preview` pass the pool-bound `db` instead, the
+  // reads may land on different pooled connections and see independent READ
+  // COMMITTED snapshots — not a regression: the pre-Drizzle code called
+  // `pool.connect()` without a `BEGIN`, so every statement already ran in its
+  // own snapshot the same way.
   const accountRows = await exec
     .select({
       id: accounts.id,

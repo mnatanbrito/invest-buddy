@@ -133,9 +133,8 @@ function formatCentsForMessage(cents: number): string {
 
 /** Postgres unique-violation SQLSTATE, whether the error is raw from pg or wrapped by Drizzle. */
 function uniqueViolation(error: unknown): boolean {
-  const direct = (error as { code?: string }).code;
-  const wrapped = (error as { cause?: { code?: string } }).cause?.code;
-  return direct === '23505' || wrapped === '23505';
+  const e = error as { code?: string; cause?: { code?: string } } | null | undefined;
+  return (e?.code ?? e?.cause?.code) === '23505';
 }
 
 /** Wraps a handler so thrown errors become JSON instead of an HTML stack page. */
@@ -619,7 +618,7 @@ export function createApp(db: Database): Express {
                i.requested_cents   AS "requestedCents",
                i.allocated_cents   AS "allocatedCents",
                i.unallocated_cents AS "unallocatedCents",
-               i.created_at        AS "createdAt",
+       to_char(i.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt",
                COALESCE(
                  json_agg(
                    json_build_object(

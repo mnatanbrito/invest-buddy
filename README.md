@@ -58,7 +58,7 @@ lines always sum to exactly the deposit.
 
 ## Running it
 
-Requires Node 20+, pnpm, and PostgreSQL running locally.
+Requires Node 20+, pnpm, and PostgreSQL (version 13 or newer) running locally.
 
 ```bash
 pnpm install
@@ -190,7 +190,6 @@ empty. Use the app's "Load example portfolio" button (or
 CI runs `pnpm db:check`, which fails if `schema.ts` changed without a matching
 migration.
 
-
 ## Scripts
 
 | Script           | What it does                                     |
@@ -212,7 +211,7 @@ migration.
 pnpm test
 ```
 
-Around 150 tests covering the rebalancing engine, money parsing and formatting,
+Around 160 tests covering the rebalancing engine, money parsing and formatting,
 diagram geometry, the portfolio reader and every API endpoint. No React rendering
 tests — the logic those components rely on is covered directly.
 
@@ -224,7 +223,7 @@ test needs starting data, and drops the database afterwards. It connects through
 `pg` rather than shelling out to `createdb`, so it does not need `psql` on your
 PATH. Set `DATABASE_URL` to point the tests at a different server.
 
-The API tests run against `createApp(pool)` via supertest without binding a port,
+The API tests run against `createApp(db)` via supertest without binding a port,
 which is why `server/index.ts` is only an entrypoint and all the routes live in
 `server/app.ts`.
 
@@ -234,7 +233,7 @@ which is why `server/index.ts` is only an entrypoint and all the routes live in
 and deletions, and holds the merge button until the `ci` workflow is green. That
 applies to everyone, including the repo owner — there is no bypass list.
 
-CI runs `pnpm lint`, `pnpm typecheck`, `pnpm test` and `pnpm build` on every PR,
+CI runs `pnpm lint`, `pnpm typecheck`, `pnpm db:check`, `pnpm test` and `pnpm build` on every PR,
 with PostgreSQL supplied as a service container so the database-backed tests run
 for real.
 
