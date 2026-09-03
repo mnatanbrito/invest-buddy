@@ -45,7 +45,11 @@ const depositSchema = z.object({
     .int('amount must be a whole number of cents')
     .positive('enter an amount greater than zero'),
   label: z.string().trim().max(60, 'label is too long').optional().default(''),
-  prioritizedAccountIds: z.array(idSchema).max(MAX_ACCOUNTS).optional().default([]),
+  prioritizedAccountIds: z
+    .array(idSchema)
+    .max(MAX_ACCOUNTS, 'too many prioritized accounts')
+    .optional()
+    .default([]),
 });
 
 const holdingsSchema = z.object({
@@ -135,9 +139,9 @@ function formatCentsForMessage(cents: number): string {
 /** Rejects a deposit that names a prioritized account the portfolio doesn't have. */
 function assertKnownPrioritized(portfolio: PortfolioState, ids: string[]): void {
   const known = new Set(portfolio.accounts.map((a) => a.id));
-  const unknown = ids.find((id) => !known.has(id));
-  if (unknown) {
-    throw new HttpError(400, `unknown account in prioritizedAccountIds: ${unknown}`);
+  const missing = ids.find((id) => !known.has(id));
+  if (missing !== undefined) {
+    throw new HttpError(400, `unknown account in prioritizedAccountIds: ${missing}`);
   }
 }
 

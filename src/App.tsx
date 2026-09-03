@@ -149,6 +149,10 @@ export default function App() {
   }
 
   const shown = preview ?? (flight ? flight.plan : null);
+  // A prioritized account is capped on purpose, so it isn't a case of room "running
+  // out" — the prioritization messages below already account for that money.
+  const roomRanOutAccounts =
+    shown?.cappedAccountIds.filter((id) => !shown.prioritizedAccountIds.includes(id)) ?? [];
   const exhaustedAccounts = portfolio.accounts.filter((a) => a.roomRemainingCents === 0);
   // Only accounts with a finite contribution room can be prioritized. `activePriorities`
   // (memoised above) is the same list narrowed to the ids currently picked.
@@ -255,10 +259,17 @@ export default function App() {
 
               {prioritizableAccounts.length > 0 && (
                 <div className="min-w-56 space-y-1.5">
-                  <span className="text-sm font-medium">Prioritize filling</span>
+                  <span id="prioritize-label" className="text-sm font-medium">
+                    Prioritize filling
+                  </span>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button type="button" variant="outline" className="w-full justify-between">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full justify-between"
+                        aria-labelledby="prioritize-label"
+                      >
                         {activePriorities.length === 0
                           ? 'No priority'
                           : activePriorities
@@ -301,11 +312,11 @@ export default function App() {
               </p>
             )}
 
-            {shown && shown.unallocatedCents > 0 && (
+            {shown && shown.unallocatedCents > 0 && roomRanOutAccounts.length > 0 && (
               <p className="text-sm text-destructive">
                 {formatCents(shown.allocatedCents)} will be invested;{' '}
                 {formatCents(shown.unallocatedCents)} stays as cash because contribution room ran out in{' '}
-                {shown.cappedAccountIds
+                {roomRanOutAccounts
                   .map((id) => portfolio.accounts.find((a) => a.id === id)?.label ?? id)
                   .join(' and ')}
                 .
