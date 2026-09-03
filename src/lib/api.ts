@@ -41,16 +41,16 @@ export const api = {
 
   loadExample: () => request<PortfolioState>('/api/presets/example', { method: 'POST' }),
 
-  preview: (amountCents: number) =>
+  preview: (amountCents: number, prioritizedAccountIds: string[] = []) =>
     request<AllocationPlan>('/api/preview', {
       method: 'POST',
-      body: JSON.stringify({ amountCents }),
+      body: JSON.stringify({ amountCents, prioritizedAccountIds }),
     }),
 
-  invest: (amountCents: number, label?: string) =>
+  invest: (amountCents: number, label?: string, prioritizedAccountIds: string[] = []) =>
     request<InvestResult>('/api/invest', {
       method: 'POST',
-      body: JSON.stringify({ amountCents, label }),
+      body: JSON.stringify({ amountCents, label, prioritizedAccountIds }),
     }),
 
   undo: () => request<PortfolioState>('/api/undo', { method: 'POST' }),

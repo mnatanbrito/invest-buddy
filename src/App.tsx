@@ -10,6 +10,14 @@ import { HistoryPanel } from '@/components/HistoryPanel';
 import { PortfolioEditor } from '@/components/editor/PortfolioEditor';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
@@ -22,6 +30,7 @@ export default function App() {
   const [history, setHistory] = useState<InvestmentRecord[]>([]);
   const [amount, setAmount] = useState('');
   const [label, setLabel] = useState('');
+  const [prioritizedAccountIds, setPrioritizedAccountIds] = useState<string[]>([]);
   const [flight, setFlight] = useState<DiagramFlight | null>(null);
   const [lastPlan, setLastPlan] = useState<AllocationPlan | null>(null);
   const [busy, setBusy] = useState<'investing' | 'undoing' | null>(null);
@@ -63,17 +72,30 @@ export default function App() {
    */
   const issues = useMemo(() => (portfolio ? allocationIssues(portfolio) : []), [portfolio]);
 
+  // The state array filtered to accounts that still have a finite contribution room —
+  // a stale id whose account lost its room limit since it was picked is ignored.
+  // Memoised so `preview` below gets a stable reference to depend on.
+  const activePriorities = useMemo(() => {
+    const prioritizable = portfolio?.accounts.filter((a) => a.roomRemainingCents !== null) ?? [];
+    return prioritizedAccountIds.filter((id) => prioritizable.some((a) => a.id === id));
+  }, [prioritizedAccountIds, portfolio]);
+
   const preview = useMemo(() => {
     if (!portfolio || parsed.cents === null || flight || issues.length > 0) return null;
-    return planDeposit(toRebalanceUnits(portfolio), portfolio.accounts, parsed.cents);
-  }, [portfolio, parsed.cents, flight, issues]);
+    return planDeposit(
+      toRebalanceUnits(portfolio),
+      portfolio.accounts,
+      parsed.cents,
+      activePriorities,
+    );
+  }, [portfolio, parsed.cents, flight, issues, activePriorities]);
 
   const invest = async () => {
     if (parsed.cents === null || !portfolio) return;
     setBusy('investing');
     setError(null);
     try {
-      const result = await api.invest(parsed.cents, label);
+      const result = await api.invest(parsed.cents, label, activePriorities);
       setFlight({ key: Date.now(), plan: result.plan });
       setLastPlan(result.plan);
       setAmount('');
@@ -127,7 +149,18 @@ export default function App() {
   }
 
   const shown = preview ?? (flight ? flight.plan : null);
+  // A prioritized account is capped on purpose, so it isn't a case of room "running
+  // out" — the prioritization messages below already account for that money.
+  const roomRanOutAccounts =
+    shown?.cappedAccountIds.filter((id) => !shown.prioritizedAccountIds.includes(id)) ?? [];
   const exhaustedAccounts = portfolio.accounts.filter((a) => a.roomRemainingCents === 0);
+  // Only accounts with a finite contribution room can be prioritized. `activePriorities`
+  // (memoised above) is the same list narrowed to the ids currently picked.
+  const prioritizableAccounts = portfolio.accounts.filter((a) => a.roomRemainingCents !== null);
+  const togglePriority = (id: string) =>
+    setPrioritizedAccountIds((current) =>
+      current.includes(id) ? current.filter((x) => x !== id) : [...current, id],
+    );
   const canInvest = parsed.cents !== null && busy === null && issues.length === 0;
   // `view` is only ever `null` before the render-phase assignment above runs, which
   // happens the same render `portfolio` first has accounts — by the time we're here
@@ -224,6 +257,47 @@ export default function App() {
                 />
               </div>
 
+              {prioritizableAccounts.length > 0 && (
+                <div className="min-w-56 space-y-1.5">
+                  <span id="prioritize-label" className="text-sm font-medium">
+                    Prioritize filling
+                  </span>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full justify-between"
+                        aria-labelledby="prioritize-label"
+                      >
+                        {activePriorities.length === 0
+                          ? 'No priority'
+                          : activePriorities
+                              .map(
+                                (id) =>
+                                  portfolio.accounts.find((a) => a.id === id)?.label ?? id,
+                              )
+                              .join(', ')}
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-56">
+                      <DropdownMenuLabel>Fill to contribution room first</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      {prioritizableAccounts.map((account) => (
+                        <DropdownMenuCheckboxItem
+                          key={account.id}
+                          checked={activePriorities.includes(account.id)}
+                          onCheckedChange={() => togglePriority(account.id)}
+                          onSelect={(event) => event.preventDefault()}
+                        >
+                          {account.label}
+                        </DropdownMenuCheckboxItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              )}
+
               <Button type="submit" size="lg" className="mt-6.5" disabled={!canInvest}>
                 {busy === 'investing' ? 'Investing…' : 'Invest'}
               </Button>
@@ -238,16 +312,71 @@ export default function App() {
               </p>
             )}
 
-            {shown && shown.unallocatedCents > 0 && (
+            {shown && shown.unallocatedCents > 0 && roomRanOutAccounts.length > 0 && (
               <p className="text-sm text-destructive">
                 {formatCents(shown.allocatedCents)} will be invested;{' '}
                 {formatCents(shown.unallocatedCents)} stays as cash because contribution room ran out in{' '}
-                {shown.cappedAccountIds
+                {roomRanOutAccounts
                   .map((id) => portfolio.accounts.find((a) => a.id === id)?.label ?? id)
                   .join(' and ')}
                 .
               </p>
             )}
+
+            {preview && preview.redirectedCents > 0 && (
+              <p className="text-sm text-muted-foreground">
+                Filling{' '}
+                {preview.prioritizedAccountIds
+                  .map((id) => portfolio.accounts.find((a) => a.id === id)?.label ?? id)
+                  .join(' and ')}{' '}
+                to contribution room first — {formatCents(preview.redirectedCents)} redirected to{' '}
+                {[
+                  ...new Set(
+                    preview.lines
+                      .filter((line) => line.redirectedCents > 0)
+                      .map(
+                        (line) =>
+                          portfolio.accounts.find((a) => a.id === line.accountId)?.label ??
+                          line.accountId,
+                      ),
+                  ),
+                ].join(' and ')}{' '}
+                to keep your asset mix.
+              </p>
+            )}
+
+            {preview &&
+              preview.lines
+                .filter(
+                  (line) =>
+                    line.blockedCents > 0 &&
+                    preview.prioritizedAccountIds.includes(line.accountId),
+                )
+                .map((line) => {
+                  const ticker = portfolio.sleeves
+                    .flatMap((s) => s.assets)
+                    .find((a) => a.id === line.assetId)?.ticker;
+                  const accountLabel =
+                    portfolio.accounts.find((a) => a.id === line.accountId)?.label ?? line.accountId;
+                  const partlyRedirected = line.redirectedCents < 0;
+                  return (
+                    <p key={line.assetId} className="text-sm text-destructive">
+                      {partlyRedirected ? (
+                        <>
+                          {formatCents(line.blockedCents)} from {accountLabel} couldn&apos;t all be
+                          redirected — the other {ticker ?? 'same-ticker'} sleeves are already at
+                          their contribution room — so {formatCents(line.blockedCents)} stays as cash.
+                        </>
+                      ) : (
+                        <>
+                          {formatCents(line.blockedCents)} from {accountLabel} couldn&apos;t be
+                          redirected — no other sleeve holds {ticker ?? 'that ticker'} — and stays as
+                          cash.
+                        </>
+                      )}
+                    </p>
+                  );
+                })}
 
             {preview && preview.unallocatedCents === 0 && (
               <p className="text-sm text-muted-foreground">

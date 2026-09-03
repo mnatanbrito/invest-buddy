@@ -68,8 +68,14 @@ export interface AllocationLine {
   intendedCents: number;
   /** What actually goes in. */
   amountCents: number;
-  /** `intendedCents - amountCents`: blocked by contribution room. */
+  /** Cents that fell out to cash: contribution room ran out, or a prioritized
+   *  overflow had no same-ticker home. Always >= 0. */
   blockedCents: number;
+  /** Net effect of the mix-preserving redirect on this line: negative on a
+   *  prioritized account's overflow line (placed portion only), positive on a
+   *  recipient line, 0 otherwise. Sums to 0 across all lines.
+   *  Invariant: amountCents === intendedCents + redirectedCents - blockedCents. */
+  redirectedCents: number;
 }
 
 export interface AllocationPlan {
@@ -80,6 +86,12 @@ export interface AllocationPlan {
   lines: AllocationLine[];
   /** Ids of accounts whose contribution room capped this deposit. */
   cappedAccountIds: string[];
+  /** Echo of the request: accounts that were asked to fill first (and exist in
+   *  the portfolio). Empty when nothing was prioritized. */
+  prioritizedAccountIds: string[];
+  /** Total cents moved from prioritized accounts to same-ticker sleeves elsewhere.
+   *  0 when nothing was prioritized. */
+  redirectedCents: number;
 }
 
 export interface InvestmentRecord {

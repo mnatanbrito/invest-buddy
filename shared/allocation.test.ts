@@ -102,8 +102,8 @@ describe('toRebalanceUnits', () => {
     const units = toRebalanceUnits(portfolio(accounts, sleeves));
 
     expect(units).toEqual([
-      { id: 'x', sleeveId: 'a', accountId: 'acct', targetWeight: 4500 * 7000, holdingCents: 0 },
-      { id: 'y', sleeveId: 'a', accountId: 'acct', targetWeight: 4500 * 3000, holdingCents: 0 },
+      { id: 'x', sleeveId: 'a', accountId: 'acct', ticker: 'x', targetWeight: 4500 * 7000, holdingCents: 0 },
+      { id: 'y', sleeveId: 'a', accountId: 'acct', ticker: 'y', targetWeight: 4500 * 3000, holdingCents: 0 },
     ]);
   });
 });

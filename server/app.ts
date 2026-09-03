@@ -14,7 +14,7 @@ import {
   toRebalanceUnits,
 } from '../shared/allocation';
 import { planDeposit } from '../shared/rebalance';
-import type { InvestmentRecord } from '../shared/types';
+import type { InvestmentRecord, PortfolioState } from '../shared/types';
 
 /** Thrown by a handler to short-circuit with a specific status code and message. */
 export class HttpError extends Error {
@@ -32,6 +32,8 @@ const centsSchema = z
   .int('amount must be a whole number of cents')
   .min(0, 'amount cannot be negative');
 
+const idSchema = z.string().trim().min(1, 'id is required');
+
 /**
  * Deposits are declared separately rather than as `centsSchema.positive()`: the
  * base schema's lower bound would fail first on a negative amount and surface
@@ -43,6 +45,11 @@ const depositSchema = z.object({
     .int('amount must be a whole number of cents')
     .positive('enter an amount greater than zero'),
   label: z.string().trim().max(60, 'label is too long').optional().default(''),
+  prioritizedAccountIds: z
+    .array(idSchema)
+    .max(MAX_ACCOUNTS, 'too many prioritized accounts')
+    .optional()
+    .default([]),
 });
 
 const holdingsSchema = z.object({
@@ -63,8 +70,6 @@ const tickerSchema = z
   .transform((s) => s.toUpperCase());
 
 const bpsSchema = z.number().int('must be a whole number').min(0).max(10_000);
-
-const idSchema = z.string().trim().min(1, 'id is required');
 
 const sortSchema = z.number().int().positive();
 
@@ -129,6 +134,15 @@ const CENTS_FORMAT = new Intl.NumberFormat('en-CA', {
  */
 function formatCentsForMessage(cents: number): string {
   return CENTS_FORMAT.format(cents / 100);
+}
+
+/** Rejects a deposit that names a prioritized account the portfolio doesn't have. */
+function assertKnownPrioritized(portfolio: PortfolioState, ids: string[]): void {
+  const known = new Set(portfolio.accounts.map((a) => a.id));
+  const missing = ids.find((id) => !known.has(id));
+  if (missing !== undefined) {
+    throw new HttpError(400, `unknown account in prioritizedAccountIds: ${missing}`);
+  }
 }
 
 /** Postgres unique-violation SQLSTATE, whether the error is raw from pg or wrapped by Drizzle. */
@@ -498,11 +512,19 @@ export function createApp(db: Database): Express {
   app.post(
     '/api/preview',
     route(async (req, res) => {
-      const { amountCents } = depositSchema.parse(req.body);
+      const { amountCents, prioritizedAccountIds } = depositSchema.parse(req.body);
       const portfolio = await readPortfolio(db);
       const issue = allocationIssues(portfolio)[0];
       if (issue) throw new HttpError(400, issue.message);
-      res.json(planDeposit(toRebalanceUnits(portfolio), portfolio.accounts, amountCents));
+      assertKnownPrioritized(portfolio, prioritizedAccountIds);
+      res.json(
+        planDeposit(
+          toRebalanceUnits(portfolio),
+          portfolio.accounts,
+          amountCents,
+          prioritizedAccountIds,
+        ),
+      );
     }),
   );
 
@@ -514,7 +536,7 @@ export function createApp(db: Database): Express {
   app.post(
     '/api/invest',
     route(async (req, res) => {
-      const { amountCents, label } = depositSchema.parse(req.body);
+      const { amountCents, label, prioritizedAccountIds } = depositSchema.parse(req.body);
 
       const result = await db.transaction(async (tx) => {
         await tx.execute(sql`LOCK TABLE assets IN SHARE ROW EXCLUSIVE MODE`);
@@ -522,7 +544,13 @@ export function createApp(db: Database): Express {
         const portfolio = await readPortfolio(tx);
         const issue = allocationIssues(portfolio)[0];
         if (issue) throw new HttpError(400, issue.message);
-        const plan = planDeposit(toRebalanceUnits(portfolio), portfolio.accounts, amountCents);
+        assertKnownPrioritized(portfolio, prioritizedAccountIds);
+        const plan = planDeposit(
+          toRebalanceUnits(portfolio),
+          portfolio.accounts,
+          amountCents,
+          prioritizedAccountIds,
+        );
 
         const [inv] = await tx
           .insert(investments)
@@ -539,7 +567,12 @@ export function createApp(db: Database): Express {
           await tx.insert(investmentLines).values({
             investmentId,
             assetId: line.assetId,
-            intendedCents: line.intendedCents,
+            // A redirect-recipient line has amountCents > intendedCents (the
+            // mix-preserving redirect intentionally routes extra cents here).
+            // Store the larger figure so the amounts_non_negative CHECK
+            // (intended_cents >= amount_cents) still holds; the unpersisted
+            // plan response keeps the true drift intention.
+            intendedCents: Math.max(line.intendedCents, line.amountCents),
             amountCents: line.amountCents,
           });
           if (line.amountCents > 0) {
